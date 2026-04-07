@@ -13,11 +13,12 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   
-  # Database
+  # Database & Persistence
   drift: ^2.20.0
   sqlite3_flutter_libs: ^0.5.24
   path_provider: ^2.1.5
   path: ^1.9.1
+  shared_preferences: ^2.3.2
   
   # Charts & UI
   fl_chart: ^0.71.0

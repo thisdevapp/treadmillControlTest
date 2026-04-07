@@ -139,10 +139,10 @@ class $DailySleepRecordsTable extends DailySleepRecords
   late final GeneratedColumn<int> sleepQuality = GeneratedColumn<int>(
     'sleep_quality',
     aliasedName,
-    false,
-    check: () => sleepQuality.between(const Constant(1), const Constant(5)),
+    true,
     type: DriftSqlType.int,
-    requiredDuringInsert: true,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(3),
   );
   static const VerificationMeta _medicationTakenMeta = const VerificationMeta(
     'medicationTaken',
@@ -342,8 +342,6 @@ class $DailySleepRecordsTable extends DailySleepRecords
           _sleepQualityMeta,
         ),
       );
-    } else if (isInserting) {
-      context.missing(_sleepQualityMeta);
     }
     if (data.containsKey('medication_taken')) {
       context.handle(
@@ -427,11 +425,10 @@ class $DailySleepRecordsTable extends DailySleepRecords
         DriftSqlType.double,
         data['${effectivePrefix}sleep_efficiency'],
       ),
-      sleepQuality:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}sleep_quality'],
-          )!,
+      sleepQuality: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sleep_quality'],
+      ),
       medicationTaken:
           attachedDatabase.typeMapping.read(
             DriftSqlType.bool,
@@ -494,7 +491,7 @@ class DailySleepRecord extends DataClass
   final int? totalSleepTimeMin;
   final int? timeInBedMin;
   final double? sleepEfficiency;
-  final int sleepQuality;
+  final int? sleepQuality;
   final bool medicationTaken;
   final List<dynamic>? medications;
   final List<dynamic>? tags;
@@ -513,7 +510,7 @@ class DailySleepRecord extends DataClass
     this.totalSleepTimeMin,
     this.timeInBedMin,
     this.sleepEfficiency,
-    required this.sleepQuality,
+    this.sleepQuality,
     required this.medicationTaken,
     this.medications,
     this.tags,
@@ -553,7 +550,9 @@ class DailySleepRecord extends DataClass
     if (!nullToAbsent || sleepEfficiency != null) {
       map['sleep_efficiency'] = Variable<double>(sleepEfficiency);
     }
-    map['sleep_quality'] = Variable<int>(sleepQuality);
+    if (!nullToAbsent || sleepQuality != null) {
+      map['sleep_quality'] = Variable<int>(sleepQuality);
+    }
     map['medication_taken'] = Variable<bool>(medicationTaken);
     if (!nullToAbsent || medications != null) {
       map['medications'] = Variable<String>(
@@ -613,7 +612,10 @@ class DailySleepRecord extends DataClass
           sleepEfficiency == null && nullToAbsent
               ? const Value.absent()
               : Value(sleepEfficiency),
-      sleepQuality: Value(sleepQuality),
+      sleepQuality:
+          sleepQuality == null && nullToAbsent
+              ? const Value.absent()
+              : Value(sleepQuality),
       medicationTaken: Value(medicationTaken),
       medications:
           medications == null && nullToAbsent
@@ -645,7 +647,7 @@ class DailySleepRecord extends DataClass
       totalSleepTimeMin: serializer.fromJson<int?>(json['totalSleepTimeMin']),
       timeInBedMin: serializer.fromJson<int?>(json['timeInBedMin']),
       sleepEfficiency: serializer.fromJson<double?>(json['sleepEfficiency']),
-      sleepQuality: serializer.fromJson<int>(json['sleepQuality']),
+      sleepQuality: serializer.fromJson<int?>(json['sleepQuality']),
       medicationTaken: serializer.fromJson<bool>(json['medicationTaken']),
       medications: serializer.fromJson<List<dynamic>?>(json['medications']),
       tags: serializer.fromJson<List<dynamic>?>(json['tags']),
@@ -669,7 +671,7 @@ class DailySleepRecord extends DataClass
       'totalSleepTimeMin': serializer.toJson<int?>(totalSleepTimeMin),
       'timeInBedMin': serializer.toJson<int?>(timeInBedMin),
       'sleepEfficiency': serializer.toJson<double?>(sleepEfficiency),
-      'sleepQuality': serializer.toJson<int>(sleepQuality),
+      'sleepQuality': serializer.toJson<int?>(sleepQuality),
       'medicationTaken': serializer.toJson<bool>(medicationTaken),
       'medications': serializer.toJson<List<dynamic>?>(medications),
       'tags': serializer.toJson<List<dynamic>?>(tags),
@@ -691,7 +693,7 @@ class DailySleepRecord extends DataClass
     Value<int?> totalSleepTimeMin = const Value.absent(),
     Value<int?> timeInBedMin = const Value.absent(),
     Value<double?> sleepEfficiency = const Value.absent(),
-    int? sleepQuality,
+    Value<int?> sleepQuality = const Value.absent(),
     bool? medicationTaken,
     Value<List<dynamic>?> medications = const Value.absent(),
     Value<List<dynamic>?> tags = const Value.absent(),
@@ -718,7 +720,7 @@ class DailySleepRecord extends DataClass
     timeInBedMin: timeInBedMin.present ? timeInBedMin.value : this.timeInBedMin,
     sleepEfficiency:
         sleepEfficiency.present ? sleepEfficiency.value : this.sleepEfficiency,
-    sleepQuality: sleepQuality ?? this.sleepQuality,
+    sleepQuality: sleepQuality.present ? sleepQuality.value : this.sleepQuality,
     medicationTaken: medicationTaken ?? this.medicationTaken,
     medications: medications.present ? medications.value : this.medications,
     tags: tags.present ? tags.value : this.tags,
@@ -857,7 +859,7 @@ class DailySleepRecordsCompanion extends UpdateCompanion<DailySleepRecord> {
   final Value<int?> totalSleepTimeMin;
   final Value<int?> timeInBedMin;
   final Value<double?> sleepEfficiency;
-  final Value<int> sleepQuality;
+  final Value<int?> sleepQuality;
   final Value<bool> medicationTaken;
   final Value<List<dynamic>?> medications;
   final Value<List<dynamic>?> tags;
@@ -898,7 +900,7 @@ class DailySleepRecordsCompanion extends UpdateCompanion<DailySleepRecord> {
     this.totalSleepTimeMin = const Value.absent(),
     this.timeInBedMin = const Value.absent(),
     this.sleepEfficiency = const Value.absent(),
-    required int sleepQuality,
+    this.sleepQuality = const Value.absent(),
     this.medicationTaken = const Value.absent(),
     this.medications = const Value.absent(),
     this.tags = const Value.absent(),
@@ -906,8 +908,7 @@ class DailySleepRecordsCompanion extends UpdateCompanion<DailySleepRecord> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
-  }) : date = Value(date),
-       sleepQuality = Value(sleepQuality);
+  }) : date = Value(date);
   static Insertable<DailySleepRecord> custom({
     Expression<String>? date,
     Expression<String>? bedtime,
@@ -965,7 +966,7 @@ class DailySleepRecordsCompanion extends UpdateCompanion<DailySleepRecord> {
     Value<int?>? totalSleepTimeMin,
     Value<int?>? timeInBedMin,
     Value<double?>? sleepEfficiency,
-    Value<int>? sleepQuality,
+    Value<int?>? sleepQuality,
     Value<bool>? medicationTaken,
     Value<List<dynamic>?>? medications,
     Value<List<dynamic>?>? tags,
@@ -1429,7 +1430,7 @@ typedef $$DailySleepRecordsTableCreateCompanionBuilder =
       Value<int?> totalSleepTimeMin,
       Value<int?> timeInBedMin,
       Value<double?> sleepEfficiency,
-      required int sleepQuality,
+      Value<int?> sleepQuality,
       Value<bool> medicationTaken,
       Value<List<dynamic>?> medications,
       Value<List<dynamic>?> tags,
@@ -1451,7 +1452,7 @@ typedef $$DailySleepRecordsTableUpdateCompanionBuilder =
       Value<int?> totalSleepTimeMin,
       Value<int?> timeInBedMin,
       Value<double?> sleepEfficiency,
-      Value<int> sleepQuality,
+      Value<int?> sleepQuality,
       Value<bool> medicationTaken,
       Value<List<dynamic>?> medications,
       Value<List<dynamic>?> tags,
@@ -1805,7 +1806,7 @@ class $$DailySleepRecordsTableTableManager
                 Value<int?> totalSleepTimeMin = const Value.absent(),
                 Value<int?> timeInBedMin = const Value.absent(),
                 Value<double?> sleepEfficiency = const Value.absent(),
-                Value<int> sleepQuality = const Value.absent(),
+                Value<int?> sleepQuality = const Value.absent(),
                 Value<bool> medicationTaken = const Value.absent(),
                 Value<List<dynamic>?> medications = const Value.absent(),
                 Value<List<dynamic>?> tags = const Value.absent(),
@@ -1847,7 +1848,7 @@ class $$DailySleepRecordsTableTableManager
                 Value<int?> totalSleepTimeMin = const Value.absent(),
                 Value<int?> timeInBedMin = const Value.absent(),
                 Value<double?> sleepEfficiency = const Value.absent(),
-                required int sleepQuality,
+                Value<int?> sleepQuality = const Value.absent(),
                 Value<bool> medicationTaken = const Value.absent(),
                 Value<List<dynamic>?> medications = const Value.absent(),
                 Value<List<dynamic>?> tags = const Value.absent(),

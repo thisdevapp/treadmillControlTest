@@ -23,6 +23,7 @@ dependencies:
   # Charts & UI
   fl_chart: ^0.71.0
   intl: ^0.20.2
+  rxdart: ^0.28.0 # 스트림 통합을 위해 추가
   
   # PDF Generation
   pdf: ^3.11.1

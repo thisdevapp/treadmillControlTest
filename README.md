@@ -1,16 +1,54 @@
-# sleep_prototype
+# 🌙 Sleep Prototype (로컬 전용 정밀 수면일지)
 
-A new Flutter project.
+정신과 진료 시 의사에게 정확하고 정밀한 수면 데이터를 제공하기 위한 **Consensus Sleep Diary (CSD)** 기반의 고성능 수면 관리 앱입니다.
 
-## Getting Started
+## 🚀 프로젝트 철학
+- **Privacy First**: 모든 데이터는 기기 내부 SQLite(Drift)에만 저장되며, 외부 서버와 통신하지 않는 완전한 로컬 프라이버시를 보장합니다.
+- **Doctor-Friendly**: 의사가 진료실에서 10초 이내에 환자의 수면 패턴, 효율, 약물 복용 시점을 한눈에 파악할 수 있도록 최적화된 리포트 뷰를 제공합니다.
+- **Precision Data**: 단순 기록을 넘어 Unix Timestamp 기반으로 모든 수면 세션을 초 단위로 정밀하게 관리합니다.
 
-This project is a starting point for a Flutter application.
+## 🛠 기술 스택
+- **Framework**: Flutter (Material 3)
+- **Database**: Drift (SQLite) - **Schema v5 (Unix Timestamp)**
+- **State Management**: RxDart (Stream 통합 및 실시간 동기화)
+- **UI Engine**: Custom Painter (지능형 충돌 회피 기능 탑재)
+- **Navigation**: PageView (무한 과거 조회 및 슬라이딩 애니메이션)
 
-A few resources to get you started if this is your first Flutter project:
+## ✨ 현재 구현된 핵심 기능
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+### 1. 차세대 데이터 아키텍처
+- **다중 수면 세션 (Multi-session)**: 밤잠뿐만 아니라 낮잠, 분절 수면(자다 깨서 다시 잠듦)을 개별 세션으로 무제한 기록할 수 있습니다.
+- **글로벌 시차 대응 (Timezone Aware)**: UTC 기반 타임스탬프와 로컬 오프셋을 동시 저장하여, 여행 중 시차가 바뀌어도 '당시 현지 시각' 기준으로 그래프를 완벽하게 복원합니다.
+- **스마트 마이그레이션**: 기존의 문자열 방식(HH:mm) 데이터를 새로운 정밀 데이터 체계로 자동 전환하는 엔진이 내장되어 있습니다.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 2. 고성능 시각화 엔진 (Statistics)
+- **반응형 레이아웃**: 태블릿, 폴더블, 일반 스마트폰 등 다양한 해상도에 맞춰 수면 막대 두께와 텍스트 크기가 동적으로 최적화됩니다.
+- **지능형 텍스트 배치 (Collision Avoidance)**: 
+    - 수면 시간이 짧아 텍스트가 겹칠 경우 자동으로 막대 밖으로 밀어냅니다.
+    - 밀려난 텍스트가 복용 점(Dot)이나 그래프 경계에 겹치면 이를 감지하여 다시 막대 안쪽으로 대피시키는 적응형 로직이 적용되어 있습니다.
+- **공간 효율 극대화**: Y축 시간 라벨을 90도 회전 배치하여 가로 공간을 확보하고, 그래프의 실질적 가독 범위를 넓혔습니다.
+- **캡슐형 디자인**: 막대 두께와 상관없이 수면의 시작과 끝을 완벽한 반원형으로 마감하여 미적 완성도를 높였습니다.
+
+### 3. 사용자 조작 및 편의성
+- **부드러운 기간 탐색**: `PageView`를 통해 7/14/30일 단위로 과거 기록을 책장 넘기듯 부드럽게 탐색할 수 있습니다.
+- **안전한 독립 삭제**: 수면 구간과 약 복용 기록을 각각 따로 인지하며, 사용자가 설정한 시간(1~10초) 동안 길게 눌러 실수 없이 삭제할 수 있습니다.
+- **테마 동기화**: 라이트/다크 모드 및 시스템 설정을 완벽하게 지원합니다.
+
+## 📂 프로젝트 구조
+- `lib/database/`: Drift 스키마 정의 및 유닉스 타임스탬프 기반 CRUD/마이그레이션 로직.
+- `lib/ui/screens/`: 
+    - `main_screen.dart`: 앱의 메인 레이아웃 및 퀵 기록 인터페이스.
+    - `statistics_screen.dart`: PageView 및 CustomPainter 기반의 고난도 그래프 엔진.
+- `lib/core/utils/`: 수면 효율 분석 및 시간 계산 유틸리티.
+
+## ⚙️ 실행 방법
+```bash
+# 의존성 설치
+flutter pub get
+
+# 코드 생성 (Drift DB 및 Serializer)
+dart run build_runner build --delete-conflicting-outputs
+
+# 앱 실행
+flutter run
+```

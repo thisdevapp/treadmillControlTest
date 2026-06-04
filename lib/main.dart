@@ -15,11 +15,8 @@ void main() async {
   final int themeIndex = prefs.getInt('themeMode') ?? 0;
   final ThemeMode initialThemeMode = ThemeMode.values[themeIndex];
 
-  // 데이터베이스 초기화 (신규 Unix Timestamp 스키마 버전 5)
+  // 데이터베이스 초기화 (신규 Unix Timestamp 스키마 버전 6)
   final database = AppDatabase();
-
-  // [임시 마이그레이션] 기존 HH:mm 데이터를 Unix Timestamp 세션 데이터로 전환
-  await database.migrateOldDataToSessions();
 
   runApp(SleepTrackerApp(
     initialThemeMode: initialThemeMode,

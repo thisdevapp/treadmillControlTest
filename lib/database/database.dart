@@ -1,5 +1,5 @@
-import 'dart:convert';
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
@@ -9,191 +9,160 @@ import 'package:intl/intl.dart';
 
 part 'database.g.dart';
 
-class JsonListConverter extends TypeConverter<List<dynamic>, String> {
-  const JsonListConverter();
-  @override
-  List<dynamic> fromSql(String fromDb) => json.decode(fromDb) as List<dynamic>;
-  @override
-  String toSql(List<dynamic> value) => json.encode(value);
-}
-
-@DataClassName('DailySleepRecord')
-class DailySleepRecords extends Table {
-  TextColumn get date => text().withLength(min: 10, max: 10)(); 
-  IntColumn get sleepQuality => integer().nullable().withDefault(const Constant(3))();
-  BoolColumn get medicationTaken => boolean().withDefault(const Constant(false))();
-  TextColumn get medications => text().map(const JsonListConverter()).nullable()();
-  TextColumn get tags => text().map(const JsonListConverter()).nullable()();
-  TextColumn get memo => text().nullable()();
-  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
-  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
-
-  TextColumn get tryToSleep => text().nullable()();
-  TextColumn get outOfBed => text().nullable()();
-  TextColumn get bedtime => text().nullable()();
-
-  @override
-  Set<Column> get primaryKey => {date};
-}
-
-@DataClassName('SleepSession')
-class SleepSessions extends Table {
+@DataClassName('CustomDataType')
+class CustomDataTypes extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get date => text().withLength(min: 10, max: 10)(); 
-  IntColumn get startUnix => integer()(); 
-  IntColumn get endUnix => integer().nullable()(); 
-  TextColumn get timezone => text().withDefault(const Constant('UTC'))(); 
-  IntColumn get offsetSeconds => integer().withDefault(const Constant(0))(); 
-  TextColumn get type => text().withDefault(const Constant('sleep'))(); 
+  TextColumn get name => text().withLength(min: 1, max: 50)();
+  TextColumn get iconName => text().nullable()();
+  IntColumn get colorValue => integer().nullable()();
+  BoolColumn get isPreset => boolean().withDefault(const Constant(false))();
 }
 
-@DataClassName('MedicationPreset')
-class MedicationPresets extends Table {
+@DataClassName('CustomDataRecord')
+class CustomDataRecords extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get name => text()();
-  TextColumn get dosage => text()();
-  TextColumn get defaultTime => text().nullable()();
+  IntColumn get typeId => integer().references(CustomDataTypes, #id)();
+  IntColumn get unixTimestamp => integer()();
+  TextColumn get value => text().nullable()();
+  TextColumn get timezone => text().withDefault(const Constant('UTC'))();
+  IntColumn get offsetSeconds => integer().withDefault(const Constant(0))();
 }
 
-@DriftDatabase(tables: [DailySleepRecords, SleepSessions, MedicationPresets])
+@DriftDatabase(tables: [CustomDataTypes, CustomDataRecords])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 5; 
+  int get schemaVersion => 9; 
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onUpgrade: (m, from, to) async {
-      if (from < 5) {
-        await m.createTable(sleepSessions);
-        await m.createTable(medicationPresets);
-        try { await m.addColumn(dailySleepRecords, dailySleepRecords.tryToSleep); } catch(_) {}
-        try { await m.addColumn(dailySleepRecords, dailySleepRecords.outOfBed); } catch(_) {}
+      print("🚀 [MIGRATION] Upgrade started: $from -> $to");
+      
+      if (from < 9) {
+        // Step 1: 새로운 테이블 생성 (이미 있으면 무시됨)
+        await m.createTable(customDataTypes);
+        await m.createTable(customDataRecords);
+
+        // Step 2: 프리셋 타입 확보
+        final types = await select(customDataTypes).get();
+        int sleepId = types.where((t) => t.name == '수면').firstOrNull?.id ?? 
+                      await into(customDataTypes).insert(CustomDataTypesCompanion.insert(name: '수면', iconName: const Value('hotel'), colorValue: const Value(0xFF4CAF50), isPreset: const Value(true)));
+        int medId = types.where((t) => t.name == '약 복용').firstOrNull?.id ?? 
+                    await into(customDataTypes).insert(CustomDataTypesCompanion.insert(name: '약 복용', iconName: const Value('medication'), colorValue: const Value(0xFF3F51B5), isPreset: const Value(true)));
+
+        // Step 3: 물리적 테이블 목록 조회
+        final tablesResult = await customSelect("SELECT name FROM sqlite_master WHERE type='table';").get();
+        final physicalTables = tablesResult.map((t) => t.read<String>('name')).toList();
+        print("📋 [MIGRATION] Current tables: $physicalTables");
+
+        // Step 4: 데이터 복사 및 테이블 백업 (삭제 안함)
+        // 4-1. 수면 세션 이전
+        if (physicalTables.contains('sleep_sessions')) {
+          try {
+            final oldSessions = await customSelect('SELECT * FROM sleep_sessions;').get();
+            for (final row in oldSessions) {
+              await into(customDataRecords).insert(CustomDataRecordsCompanion.insert(
+                typeId: sleepId,
+                unixTimestamp: row.read<int>('start_unix'),
+                value: Value(row.read<int?>('end_unix') != null ? jsonEncode({'endUnix': row.read<int?>('end_unix'), 'quality': 3, 'memo': '이전 기록'}) : null),
+                timezone: Value(row.read<String>('timezone')),
+                offsetSeconds: Value(row.read<int>('offset_seconds')),
+              ));
+            }
+            print("✅ [MIGRATION] Migrated ${oldSessions.length} sessions. Renaming table to backup...");
+            await customStatement('ALTER TABLE sleep_sessions RENAME TO backup_v5_sleep_sessions;');
+          } catch (e) { print("❌ [MIGRATION] Sleep migration error: $e"); }
+        }
+
+        // 4-2. 복용 기록 이전
+        if (physicalTables.contains('daily_sleep_records')) {
+          try {
+            final oldDaily = await customSelect('SELECT * FROM daily_sleep_records WHERE medications IS NOT NULL;').get();
+            int count = 0;
+            for (final row in oldDaily) {
+              final List meds = jsonDecode(row.read<String>('medications'));
+              for (final med in meds) {
+                if (med['unix'] != null) {
+                  await into(customDataRecords).insert(CustomDataRecordsCompanion.insert(
+                    typeId: medId,
+                    unixTimestamp: med['unix'],
+                    value: Value(med['name'] ?? '이전 약물'),
+                    timezone: const Value('UTC'),
+                    offsetSeconds: Value(med['offset'] ?? 0),
+                  ));
+                  count++;
+                }
+              }
+            }
+            print("✅ [MIGRATION] Migrated $count meds. Renaming table to backup...");
+            await customStatement('ALTER TABLE daily_sleep_records RENAME TO backup_v5_daily_sleep_records;');
+          } catch (e) { print("❌ [MIGRATION] Med migration error: $e"); }
+        }
       }
+      print("🚀 [MIGRATION] Upgrade completed.");
+    },
+    onCreate: (m) async {
+      await m.createAll();
+      await into(customDataTypes).insert(CustomDataTypesCompanion.insert(name: '수면', iconName: const Value('hotel'), colorValue: const Value(0xFF4CAF50), isPreset: const Value(true)));
+      await into(customDataTypes).insert(CustomDataTypesCompanion.insert(name: '약 복용', iconName: const Value('medication'), colorValue: const Value(0xFF3F51B5), isPreset: const Value(true)));
     },
   );
 
-  Future<void> migrateOldDataToSessions() async {
-    final allDaily = await select(dailySleepRecords).get();
-    
-    // 1. 복용 기록 마이그레이션 (개별 레코드 단위로 항상 체크)
-    for (var record in allDaily) {
-      if (record.medications != null) {
-        final List<dynamic> meds = List.from(record.medications!);
-        bool changed = false;
-        for (var i = 0; i < meds.length; i++) {
-          final med = Map<String, dynamic>.from(meds[i] as Map);
-          // unix 필드가 없는 예전 데이터라면
-          if (med['unix'] == null && med['timestamp'] != null) {
-            try {
-              final ts = DateTime.parse(med['timestamp'] as String);
-              med['unix'] = ts.millisecondsSinceEpoch ~/ 1000;
-              med['offset'] = ts.timeZoneOffset.inSeconds;
-              meds[i] = med;
-              changed = true;
-            } catch (e) {
-              print("[MIGRATION] Med parse error for ${record.date}: $e");
-            }
-          }
-        }
-        if (changed) {
-          await (update(dailySleepRecords)..where((t) => t.date.equals(record.date))).write(
-            DailySleepRecordsCompanion(medications: Value(meds)),
-          );
-          print("[MIGRATION] Migrated medication for ${record.date}");
-        }
-      }
-    }
-
-    // 2. 수면 세션 마이그레이션 (세션 테이블이 비어있을 때만 수행)
-    final existingSessions = await select(sleepSessions).get();
-    if (existingSessions.isEmpty) {
-      for (var record in allDaily) {
-        if (record.tryToSleep != null && record.outOfBed != null) {
-          try {
-            final partsS = record.tryToSleep!.split(':');
-            final partsE = record.outOfBed!.split(':');
-            final baseDate = DateTime.parse(record.date);
-            final startDT = DateTime(baseDate.year, baseDate.month, baseDate.day, int.parse(partsS[0]), int.parse(partsS[1]));
-            var endDT = DateTime(baseDate.year, baseDate.month, baseDate.day, int.parse(partsE[0]), int.parse(partsE[1]));
-            if (endDT.isBefore(startDT)) endDT = endDT.add(const Duration(days: 1));
-            await addSleepSession(date: record.date, start: startDT, end: endDT);
-            print("[MIGRATION] Migrated sleep session for ${record.date}");
-          } catch (e) {
-            print("[MIGRATION] Sleep migration error for ${record.date}: $e");
-          }
-        }
-      }
-    }
+  // === CustomDataType CRUD ===
+  Stream<List<CustomDataType>> watchCustomDataTypes() => select(customDataTypes).watch();
+  Future<List<CustomDataType>> getCustomDataTypes() => select(customDataTypes).get();
+  
+  Future<int> addCustomDataType({required String name, String? iconName, int? colorValue, bool isPreset = false}) {
+    return into(customDataTypes).insert(CustomDataTypesCompanion.insert(
+      name: name, iconName: Value(iconName), colorValue: Value(colorValue), isPreset: Value(isPreset),
+    ));
   }
 
-  Future<DailySleepRecord?> getRecordByDate(String date) => (select(dailySleepRecords)..where((t) => t.date.equals(date))).getSingleOrNull();
+  Future<void> updateCustomDataType(int id, String name, String? iconName, int? colorValue) {
+    return (update(customDataTypes)..where((t) => t.id.equals(id))).write(
+      CustomDataTypesCompanion(name: Value(name), iconName: Value(iconName), colorValue: Value(colorValue)),
+    );
+  }
 
-  Stream<List<DailySleepRecord>> watchRecordsInPeriod(DateTime start, DateTime end) {
-    final f = DateFormat('yyyy-MM-dd');
-    return (select(dailySleepRecords)
-          ..where((t) => t.date.isBetweenValues(f.format(start), f.format(end)))
-          ..orderBy([(t) => OrderingTerm(expression: t.date, mode: OrderingMode.asc)]))
+  Future<void> deleteCustomDataType(int id) async {
+    await transaction(() async {
+      await (delete(customDataRecords)..where((t) => t.typeId.equals(id))).go();
+      await (delete(customDataTypes)..where((t) => t.id.equals(id))).go();
+    });
+  }
+
+  // === CustomDataRecord CRUD ===
+  Stream<List<CustomDataRecord>> watchRecordsInPeriod(DateTime start, DateTime end) {
+    final startUnix = start.millisecondsSinceEpoch ~/ 1000;
+    final endUnix = end.millisecondsSinceEpoch ~/ 1000;
+    return (select(customDataRecords)
+          ..where((t) => t.unixTimestamp.isBetweenValues(startUnix, endUnix))
+          ..orderBy([(t) => OrderingTerm(expression: t.unixTimestamp, mode: OrderingMode.asc)]))
         .watch();
   }
 
-  Stream<List<SleepSession>> watchSessionsInPeriod(DateTime start, DateTime end) {
-    final f = DateFormat('yyyy-MM-dd');
-    return (select(sleepSessions)
-          ..where((t) => t.date.isBetweenValues(f.format(start), f.format(end))))
-        .watch();
-  }
-
-  Future<void> addSleepSession({required String date, required DateTime start, required DateTime end, String type = 'sleep'}) async {
-    await into(sleepSessions).insert(SleepSessionsCompanion.insert(
-      date: date,
-      startUnix: start.millisecondsSinceEpoch ~/ 1000,
-      endUnix: Value(end.millisecondsSinceEpoch ~/ 1000),
+  Future<int> addCustomDataRecord({required int typeId, required DateTime timestamp, String? value}) {
+    return into(customDataRecords).insert(CustomDataRecordsCompanion.insert(
+      typeId: typeId,
+      unixTimestamp: timestamp.millisecondsSinceEpoch ~/ 1000,
+      value: Value(value),
       timezone: Value(DateTime.now().timeZoneName),
       offsetSeconds: Value(DateTime.now().timeZoneOffset.inSeconds),
-      type: Value(type),
-    ));
-    await into(dailySleepRecords).insertOnConflictUpdate(DailySleepRecordsCompanion(
-      date: Value(date),
-      updatedAt: Value(DateTime.now()),
     ));
   }
 
-  Future<void> deleteSession(int id) => (delete(sleepSessions)..where((t) => t.id.equals(id))).go();
+  Future<void> deleteCustomDataRecord(int id) => (delete(customDataRecords)..where((t) => t.id.equals(id))).go();
 
-  Future<void> deleteMedicationIntake(String date, String unixId) async {
-    final existing = await getRecordByDate(date);
-    if (existing != null && existing.medications != null) {
-      final List<dynamic> meds = List.from(existing.medications!);
-      meds.removeWhere((m) => m['unix'].toString() == unixId);
-      await (update(dailySleepRecords)..where((t) => t.date.equals(date))).write(
-        DailySleepRecordsCompanion(
-          medications: Value(meds),
-          medicationTaken: Value(meds.isNotEmpty),
-          updatedAt: Value(DateTime.now()),
-        ),
-      );
-    }
-  }
-
-  Future<void> logMedicationIntake({DateTime? dateTime}) async {
-    final targetTime = dateTime ?? DateTime.now();
-    final dateStr = DateFormat('yyyy-MM-dd').format(targetTime);
-    final existing = await getRecordByDate(dateStr);
-    List<dynamic> meds = (existing != null && existing.medications != null) ? List.from(existing.medications!) : [];
-    meds.add({
-      'time': DateFormat('HH:mm').format(targetTime), 
-      'timestamp': targetTime.toIso8601String(),
-      'unix': targetTime.millisecondsSinceEpoch ~/ 1000,
-      'offset': targetTime.timeZoneOffset.inSeconds,
-    });
-    await into(dailySleepRecords).insertOnConflictUpdate(DailySleepRecordsCompanion(
-      date: Value(dateStr),
-      medicationTaken: const Value(true),
-      medications: Value(meds),
-      updatedAt: Value(DateTime.now()),
-    ));
+  Future<List<String>> getRecentRecordValues(int typeId) async {
+    final query = select(customDataRecords)
+      ..where((t) => t.typeId.equals(typeId) & t.value.isNotNull())
+      ..orderBy([(t) => OrderingTerm(expression: t.unixTimestamp, mode: OrderingMode.desc)])
+      ..limit(50);
+    final results = await query.get();
+    final values = results.map((r) => r.value!.trim()).where((v) => v.isNotEmpty).toSet().toList();
+    return values.length > 10 ? values.sublist(0, 10) : values;
   }
 }
 

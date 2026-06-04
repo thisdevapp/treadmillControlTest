@@ -1,25 +1,105 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rxdart/rxdart.dart';
-import 'package:drift/drift.dart' show Value;
 import '../../database/database.dart';
+import '../widgets/custom_picker_utils.dart';
 
-// 터치 판정 및 삭제를 위한 데이터 구조
+/// 모든 차트 요소의 크기와 패딩을 중앙 관리하는 클래스
+class _ChartMetrics {
+  final double barWidth;
+  final double medRadius;
+  final double labelFontSize;
+  final double dateFontSize;
+  final double valueFontSize;
+  final double topPadding;
+
+  factory _ChartMetrics(double dayWidth) {
+    double bw = (dayWidth * 0.75).clamp(6.0, 150.0);
+    bw = (bw * 2).roundToDouble() / 2.0; 
+
+    final double lfs = (bw * 0.25 + 6).clamp(8.0, 30.0); 
+    final double dfs = (bw * 0.5 + 7).clamp(10.0, 60.0);  
+    final double vfs = (bw * 0.3 + 4).clamp(7.0, 32.0);  
+    
+    final double calculatedTopPadding = lfs + dfs;
+    
+    return _ChartMetrics._(
+      barWidth: bw,
+      medRadius: bw / 2.0,
+      labelFontSize: lfs,
+      dateFontSize: dfs,
+      valueFontSize: vfs,
+      topPadding: calculatedTopPadding.clamp(20.0, 150.0),
+    );
+  }
+
+  _ChartMetrics._({
+    required this.barWidth,
+    required this.medRadius,
+    required this.labelFontSize,
+    required this.dateFontSize,
+    required this.valueFontSize,
+    required this.topPadding,
+  });
+}
+
+class _StaticYAxisPainter extends CustomPainter {
+  final _ChartMetrics metrics;
+  final bool isDarkMode;
+
+  _StaticYAxisPainter({required this.metrics, required this.isDarkMode});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const double bottomPadding = 30.0;
+    final double chartHeight = size.height - metrics.topPadding - bottomPadding;
+
+    for (int h = 0; h <= 24; h += 6) {
+      double y = metrics.topPadding + (h / 24.0) * chartHeight;
+      final tpYLabel = _getTextPainter(
+        "${h.toString().padLeft(2, '0')}:00", 
+        (metrics.labelFontSize * 0.9).clamp(9, 15), 
+        Colors.grey
+      );
+      
+      canvas.save();
+      canvas.translate(size.width / 2, y);
+      canvas.rotate(math.pi / 2);
+      tpYLabel.paint(canvas, Offset(-tpYLabel.width / 2, -tpYLabel.height / 2));
+      canvas.restore();
+    }
+  }
+
+  TextPainter _getTextPainter(String text, double fontSize, Color color) {
+    return TextPainter(
+      text: TextSpan(text: text, style: TextStyle(color: color, fontSize: fontSize)),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+  }
+
+  @override
+  bool shouldRepaint(covariant _StaticYAxisPainter oldDelegate) => 
+      oldDelegate.metrics.topPadding != metrics.topPadding || oldDelegate.isDarkMode != isDarkMode;
+}
+
 class _HitInfo {
-  final String id;
+  final int recordId;
   final String hitType;
-  final String timeText;
+  final String titleText;
+  final String subtitleText;
   final Offset targetPos;
   final String displayDate;
 
   _HitInfo({
-    required this.id,
+    required this.recordId,
     required this.hitType,
-    required this.timeText,
+    required this.titleText,
+    required this.subtitleText,
     required this.targetPos,
     required this.displayDate,
   });
@@ -70,14 +150,14 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     super.dispose();
   }
 
-  Future<void> _savePeriod(int days) async {
+  Future<void> _savePeriod(int days, {int? targetPage}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('statistics_period', days);
     if (mounted) {
       setState(() {
         _selectedPeriodDays = days;
-        _currentPageIndex = 0;
-        _pageController.jumpToPage(0);
+        _currentPageIndex = targetPage ?? 0;
+        _pageController.jumpToPage(_currentPageIndex);
       });
     }
   }
@@ -102,6 +182,41 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     );
   }
 
+  Future<void> _pickStartDate(DateTime currentStart, DateTime currentEnd, DateTime baseDate) async {
+    final picked = await CustomPickerUtils.pickDate(
+      context: context,
+      initialDate: currentStart,
+      lastDate: currentEnd, 
+      helpText: "시작 날짜 선택",
+    );
+    if (picked != null) {
+      final newPeriod = currentEnd.difference(picked).inDays + 1;
+      if (newPeriod > 0) {
+        final daysFromToday = baseDate.difference(currentEnd).inDays;
+        final newIndex = daysFromToday ~/ newPeriod;
+        _savePeriod(newPeriod, targetPage: newIndex);
+      }
+    }
+  }
+
+  Future<void> _pickEndDate(DateTime currentEnd, DateTime currentStart, DateTime baseDate) async {
+    final picked = await CustomPickerUtils.pickDate(
+      context: context,
+      initialDate: currentEnd,
+      firstDate: currentStart, 
+      lastDate: DateTime.now(),
+      helpText: "끝 날짜 선택",
+    );
+    if (picked != null) {
+      final daysFromToday = baseDate.difference(picked).inDays;
+      final newIndex = daysFromToday ~/ _selectedPeriodDays;
+      setState(() {
+        _currentPageIndex = newIndex;
+        _pageController.jumpToPage(newIndex);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final DateTime today = DateTime.now();
@@ -111,50 +226,70 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     final displayEndDate = baseDate.subtract(Duration(days: daysOffset));
     final displayStartDate = displayEndDate.subtract(Duration(days: _selectedPeriodDays - 1));
 
-    return Scaffold(
-      body: Stack(
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8), 
+      child: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildTopBar(),
-                const SizedBox(height: 8),
-                _buildAnimatedHeader(displayStartDate, displayEndDate),
-                const SizedBox(height: 12),
-                _buildLegend(),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: PageView.builder(
-                    controller: _pageController,
-                    reverse: true, 
-                    physics: const BouncingScrollPhysics(),
-                    onPageChanged: (index) {
-                      setState(() {
-                        _currentPageIndex = index;
-                      });
-                    },
-                    itemBuilder: (context, index) {
-                      return _StatisticsPageContent(
-                        database: widget.database,
-                        pageIndex: index,
-                        periodDays: _selectedPeriodDays,
-                        showAllDetails: _showAllDetails,
-                        longPressSeconds: widget.longPressSeconds,
-                        onExecuteLongPress: _executeLongPress,
-                        yAxisWidth: yAxisWidth,
-                      );
-                    },
-                  ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildTopBar(),
+              _buildAnimatedHeader(displayStartDate, displayEndDate, baseDate),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final double dataAreaWidth = constraints.maxWidth - yAxisWidth;
+                    final double dayWidth = dataAreaWidth / _selectedPeriodDays;
+                    final metrics = _ChartMetrics(dayWidth);
+
+                    return Row(
+                      children: [
+                        SizedBox(
+                          width: yAxisWidth,
+                          height: double.infinity,
+                          child: CustomPaint(
+                            painter: _StaticYAxisPainter(
+                              metrics: metrics,
+                              isDarkMode: Theme.of(context).brightness == Brightness.dark,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: PageView.builder(
+                            controller: _pageController,
+                            reverse: true, 
+                            physics: const BouncingScrollPhysics(),
+                            onPageChanged: (index) {
+                              setState(() {
+                                _currentPageIndex = index;
+                              });
+                            },
+                            itemBuilder: (context, index) {
+                              return _StatisticsPageContent(
+                                database: widget.database,
+                                pageIndex: index,
+                                periodDays: _selectedPeriodDays,
+                                showAllDetails: _showAllDetails,
+                                longPressSeconds: widget.longPressSeconds,
+                                onExecuteLongPress: _executeLongPress,
+                                yAxisWidth: 0, 
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 8),
+              _buildLegend(),
+            ],
           ),
           if (_isMenuOpen)
             GestureDetector(
               onTap: () => setState(() => _isMenuOpen = false),
-              child: Container(color: Colors.black.withValues(alpha: 0.1)),
+              child: Container(color: Colors.black.withOpacity(0.1)),
             ),
           _buildFabMenu(),
         ],
@@ -163,48 +298,62 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   }
 
   Widget _buildTopBar() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(
-          children: [7, 14, 30].map((days) {
-            return Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: ChoiceChip(
-                label: Text("$days일"),
-                selected: _selectedPeriodDays == days,
-                onSelected: (selected) {
-                  if (selected) _savePeriod(days);
-                },
+    return Theme(
+      data: Theme.of(context).copyWith(
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [7, 14, 30].map((days) {
+              return Padding(
+                padding: const EdgeInsets.only(right: 4.0),
+                child: ChoiceChip(
+                  label: Text("$days일", style: const TextStyle(fontSize: 11)),
+                  selected: _selectedPeriodDays == days,
+                  onSelected: (selected) {
+                    if (selected) _savePeriod(days);
+                  },
+                  padding: EdgeInsets.zero,
+                ),
+              );
+            }).toList(),
+          ),
+          Row(
+            children: [
+              IconButton(
+                onPressed: _resetToToday,
+                icon: const Icon(Icons.today_outlined, size: 18),
+                tooltip: "오늘로 이동",
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(4),
               ),
-            );
-          }).toList(),
-        ),
-        Row(
-          children: [
-            IconButton(
-              onPressed: _resetToToday,
-              icon: const Icon(Icons.today_outlined),
-              tooltip: "오늘로 이동",
-            ),
-            IconButton(
-              onPressed: () => setState(() => _showAllDetails = !_showAllDetails),
-              icon: Icon(
-                _showAllDetails ? Icons.segment : Icons.segment_outlined,
-                color: _showAllDetails ? Colors.indigo : null,
+              IconButton(
+                onPressed: () => setState(() => _showAllDetails = !_showAllDetails),
+                icon: Icon(
+                  _showAllDetails ? Icons.segment : Icons.segment_outlined,
+                  color: _showAllDetails ? Colors.indigo : null,
+                  size: 18,
+                ),
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(4),
               ),
-            ),
-            IconButton.filledTonal(
-              onPressed: () => setState(() => _isMenuOpen = !_isMenuOpen),
-              icon: Icon(_isMenuOpen ? Icons.close : Icons.add),
-            ),
-          ],
-        ),
-      ],
+              IconButton.filledTonal(
+                onPressed: () => setState(() => _isMenuOpen = !_isMenuOpen),
+                icon: Icon(_isMenuOpen ? Icons.close : Icons.add, size: 18),
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(4),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildAnimatedHeader(DateTime start, DateTime end) {
+  Widget _buildAnimatedHeader(DateTime start, DateTime end, DateTime baseDate) {
     final f = DateFormat('yyyy.MM.dd');
     final isTodayPage = _currentPageIndex == 0;
 
@@ -212,97 +361,279 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         IconButton(
-          icon: const Icon(Icons.chevron_left, size: 28),
+          icon: const Icon(Icons.chevron_left, size: 20),
           onPressed: () => _movePage(1),
+          constraints: const BoxConstraints(),
+          padding: const EdgeInsets.all(4),
         ),
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 300),
-          transitionBuilder: (Widget child, Animation<double> animation) {
-            return FadeTransition(
-              opacity: animation,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0.0, 0.1),
-                  end: Offset.zero,
-                ).animate(animation),
-                child: child,
-              ),
-            );
-          },
           child: Container(
-            key: ValueKey<int>(_currentPageIndex), 
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            key: ValueKey<String>("${_currentPageIndex}_$_selectedPeriodDays"), 
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1), 
             decoration: BoxDecoration(
-              color: Colors.indigo.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(25),
+              color: Colors.indigo.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(15),
             ),
-            child: Text(
-              "${f.format(start)} ~ ${f.format(end)}",
-              style: const TextStyle(
-                fontWeight: FontWeight.bold, 
-                fontSize: 15, 
-                color: Colors.indigo,
-                letterSpacing: 0.5,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildDateClickableText(f.format(start), () => _pickStartDate(start, end, baseDate)),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 2),
+                  child: Text("~", style: TextStyle(color: Colors.indigo, fontWeight: FontWeight.bold, fontSize: 11)),
+                ),
+                _buildDateClickableText(f.format(end), () => _pickEndDate(end, start, baseDate)),
+              ],
             ),
           ),
         ),
         IconButton(
-          icon: const Icon(Icons.chevron_right, size: 28),
+          icon: const Icon(Icons.chevron_right, size: 20),
           onPressed: isTodayPage ? null : () => _movePage(-1),
+          constraints: const BoxConstraints(),
+          padding: const EdgeInsets.all(4),
         ),
       ],
     );
   }
 
-  Widget _buildLegend() {
-    return Row(children: [
-      _legendItem(Colors.green.withValues(alpha: 0.7), "수면 구간"), const SizedBox(width: 12),
-      _legendItem(Colors.indigo, "약 복용"),
-    ]);
+  Widget _buildDateClickableText(String text, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold, 
+            fontSize: 12, 
+            color: Colors.indigo,
+          ),
+        ),
+      ),
+    );
   }
 
-  Widget _legendItem(Color c, String l) => Row(children: [Container(width: 10, height: 10, decoration: BoxDecoration(color: c, shape: BoxShape.circle)), const SizedBox(width: 4), Text(l, style: const TextStyle(fontSize: 11))]);
+  Widget _buildLegend() {
+    return FutureBuilder<List<CustomDataType>>(
+      future: widget.database.getCustomDataTypes(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+        final types = snapshot.data!;
+        
+        return Wrap(
+          spacing: 12,
+          runSpacing: 4,
+          children: types.map((t) {
+            final color = Color(t.colorValue ?? 0xFF3F51B5);
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 9, 
+                  height: 9, 
+                  decoration: BoxDecoration(color: color.withOpacity(0.8), shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 4),
+                Text(t.name, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              ],
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
 
   Widget _buildFabMenu() {
     if (!_isMenuOpen) return const SizedBox.shrink();
-    return Positioned(top: 80, right: 16, child: Material(elevation: 8, borderRadius: BorderRadius.circular(12), child: Column(mainAxisSize: MainAxisSize.min, children: [
-      _menuItem(Icons.medication, "복용 기록 추가", _pickMedicationTime), const Divider(height: 1),
-      _menuItem(Icons.bedtime, "수면 기록 추가", _pickSleepPeriod),
-    ])));
+    return Positioned(
+      top: 80, 
+      right: 16, 
+      child: Material(
+        elevation: 8, 
+        borderRadius: BorderRadius.circular(12), 
+        child: FutureBuilder<List<CustomDataType>>(
+          future: widget.database.getCustomDataTypes(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) return const SizedBox.shrink();
+            final types = snapshot.data!;
+            final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
+            final otherTypes = types.where((t) => t.id != sleepType.id).toList();
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _menuItem(Icons.bedtime, "수면 기록 추가", () => _pickSleepPeriod(sleepType.id)),
+                if (otherTypes.isNotEmpty) ...[
+                  const Divider(height: 1),
+                  ...otherTypes.map((type) {
+                    return _menuItem(
+                      _getIconData(type.iconName),
+                      "${type.name} 추가",
+                      () => _pickCustomEventTime(type),
+                    );
+                  })
+                ]
+              ],
+            );
+          },
+        ),
+      ),
+    );
   }
 
-  Widget _menuItem(IconData i, String l, VoidCallback t) => InkWell(onTap: () { setState(() => _isMenuOpen = false); t(); }, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), child: Row(children: [Icon(i, size: 20, color: Colors.indigo), const SizedBox(width: 12), Text(l)])));
+  IconData _getIconData(String? name) {
+    switch (name) {
+      case 'hotel': return Icons.hotel;
+      case 'medication': return Icons.medication;
+      case 'coffee': return Icons.local_cafe;
+      case 'smoke': return Icons.smoking_rooms;
+      case 'sports': return Icons.directions_run;
+      case 'beer': return Icons.local_bar;
+      case 'star': return Icons.star;
+      case 'favorite': return Icons.favorite;
+      case 'mood': return Icons.mood;
+      default: return Icons.category;
+    }
+  }
 
-  Future<void> _pickMedicationTime() async {
-    final d = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now());
+  Widget _menuItem(IconData i, String l, VoidCallback t) => InkWell(
+    onTap: () { 
+      setState(() => _isMenuOpen = false); 
+      t(); 
+    }, 
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), 
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(i, size: 18, color: Colors.indigo), 
+          const SizedBox(width: 10), 
+          Text(l, style: const TextStyle(fontSize: 13)),
+        ],
+      ),
+    ),
+  );
+
+  Future<void> _pickCustomEventTime(CustomDataType type) async {
+    final d = await CustomPickerUtils.pickDate(context: context, initialDate: DateTime.now());
     if (d == null) return;
-    final t = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+    final t = await CustomPickerUtils.pickTime(context: context, initialTime: TimeOfDay.now());
     if (t == null) return;
-    await widget.database.logMedicationIntake(dateTime: DateTime(d.year, d.month, d.day, t.hour, t.minute));
+    
+    final finalTime = DateTime(d.year, d.month, d.day, t.hour, t.minute);
+    
+    if (mounted) {
+      final memoController = TextEditingController();
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text("${type.name} 입력"),
+          content: TextField(
+            controller: memoController,
+            decoration: const InputDecoration(
+              labelText: "추가 세부 사항 (선택)",
+              hintText: "예: 졸피뎀 10mg, 아메리카노 등",
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+            FilledButton(
+              onPressed: () async {
+                await widget.database.addCustomDataRecord(
+                  typeId: type.id,
+                  timestamp: finalTime,
+                  value: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
+                );
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text("저장"),
+            )
+          ],
+        ),
+      );
+    }
   }
 
-  Future<void> _pickSleepPeriod() async {
-    final d = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now());
+  Future<void> _pickSleepPeriod(int sleepTypeId) async {
+    final d = await CustomPickerUtils.pickDate(context: context, initialDate: DateTime.now());
     if (d == null) return;
-    final sT = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 22, minute: 0), helpText: "수면 시작");
+    final sT = await CustomPickerUtils.pickTime(context: context, initialTime: const TimeOfDay(hour: 22, minute: 0), helpText: "수면 시작");
     if (sT == null) return;
-    final eT = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 7, minute: 0), helpText: "기상 시각");
+    final eT = await CustomPickerUtils.pickTime(context: context, initialTime: const TimeOfDay(hour: 7, minute: 0), helpText: "기상 시각");
     if (eT == null) return;
+    
     final start = DateTime(d.year, d.month, d.day, sT.hour, sT.minute);
     var end = DateTime(d.year, d.month, d.day, eT.hour, eT.minute);
     if (end.isBefore(start)) end = end.add(const Duration(days: 1));
-    await widget.database.addSleepSession(date: DateFormat('yyyy-MM-dd').format(d), start: start, end: end);
+
+    if (mounted) {
+      int quality = 3;
+      final memoController = TextEditingController();
+
+      showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setStateDlg) => AlertDialog(
+            title: const Text("수면 만족도 기입"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("만족도를 탭해서 선택하세요:"),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (idx) {
+                    return IconButton(
+                      icon: Icon(idx < quality ? Icons.star : Icons.star_border, color: Colors.amber, size: 28),
+                      onPressed: () => setStateDlg(() => quality = idx + 1),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: memoController,
+                  decoration: const InputDecoration(labelText: "수면 특이사항 메모 (선택)", border: OutlineInputBorder()),
+                )
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+              FilledButton(
+                onPressed: () async {
+                  final valueJson = json.encode({
+                    'endUnix': end.millisecondsSinceEpoch ~/ 1000,
+                    'quality': quality,
+                    'memo': memoController.text.trim(),
+                  });
+                  await widget.database.addCustomDataRecord(
+                    typeId: sleepTypeId,
+                    timestamp: start,
+                    value: valueJson,
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text("완료"),
+              )
+            ],
+          ),
+        ),
+      );
+    }
   }
 
   void _executeLongPress(_HitInfo hit) {
     showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: Text(hit.hitType == 'med' ? "약 기록 삭제" : "수면 세션 삭제"), content: const Text("정말로 삭제하시겠습니까?"),
+      title: Text(hit.titleText), 
+      content: Text("${hit.subtitleText}\n\n정말로 이 기록을 완전히 삭제하시겠습니까?"),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
         TextButton(onPressed: () async {
-          if (hit.hitType == 'med') await widget.database.deleteMedicationIntake(hit.displayDate, hit.id);
-          else await widget.database.deleteSession(int.parse(hit.id));
+          await widget.database.deleteCustomDataRecord(hit.recordId);
           if(mounted) Navigator.pop(ctx);
         }, child: const Text("삭제", style: TextStyle(color: Colors.red))),
       ],
@@ -361,8 +692,11 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
 
     _pageStream = Rx.combineLatest2(
       widget.database.watchRecordsInPeriod(startOfWindow, endOfWindow),
-      widget.database.watchSessionsInPeriod(startOfWindow, endOfWindow),
-      (List<DailySleepRecord> records, List<SleepSession> sessions) => {'records': records, 'sessions': sessions},
+      widget.database.watchCustomDataTypes(),
+      (List<CustomDataRecord> records, List<CustomDataType> types) => {
+        'records': records, 
+        'types': types,
+      },
     );
   }
 
@@ -378,8 +712,8 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
     return StreamBuilder<Map<String, dynamic>>(
       stream: _pageStream,
       builder: (context, snapshot) {
-        final List<DailySleepRecord> records = snapshot.hasData ? List<DailySleepRecord>.from(snapshot.data!['records'] as Iterable) : <DailySleepRecord>[];
-        final List<SleepSession> sessions = snapshot.hasData ? List<SleepSession>.from(snapshot.data!['sessions'] as Iterable) : <SleepSession>[];
+        final List<CustomDataRecord> records = snapshot.hasData ? List<CustomDataRecord>.from(snapshot.data!['records'] as Iterable) : <CustomDataRecord>[];
+        final List<CustomDataType> types = snapshot.hasData ? List<CustomDataType>.from(snapshot.data!['types'] as Iterable) : <CustomDataType>[];
 
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -388,7 +722,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
             return GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTapDown: (details) {
-                final hit = _checkHit(details.localPosition, pageDates, records, sessions, dayWidth, widget.yAxisWidth, constraints.maxHeight);
+                final hit = _checkHit(details.localPosition, pageDates, records, types, dayWidth, widget.yAxisWidth, constraints.maxHeight);
                 if (hit != null) {
                   _longPressTimer?.cancel();
                   _longPressTimer = Timer(Duration(milliseconds: (widget.longPressSeconds * 1000).toInt()), () => widget.onExecuteLongPress(hit));
@@ -401,7 +735,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
                 painter: SleepTimelinePainter(
                   allDates: pageDates,
                   records: records,
-                  sessions: sessions,
+                  types: types,
                   isDarkMode: Theme.of(context).brightness == Brightness.dark,
                   dayWidth: dayWidth,
                   showAllDetails: widget.showAllDetails,
@@ -415,47 +749,75 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
     );
   }
 
-  _HitInfo? _checkHit(Offset pos, List<DateTime> dates, List<DailySleepRecord> records, List<SleepSession> sessions, double dayWidth, double left, double height) {
-    const double topPadding = 60.0;
+  _HitInfo? _checkHit(Offset pos, List<DateTime> dates, List<CustomDataRecord> records, List<CustomDataType> types, double dayWidth, double left, double height) {
+    if (types.isEmpty) return null;
+    final metrics = _ChartMetrics(dayWidth);
+    
     const double bottomPadding = 30.0;
-    final double chartHeight = height - topPadding - bottomPadding;
+    final double chartHeight = height - metrics.topPadding - bottomPadding;
     final double x = pos.dx - left;
     if (x < 0) return null;
+
     final int dayIdx = (x / dayWidth).floor();
     if (dayIdx < 0 || dayIdx >= dates.length) return null;
-    final dateStr = DateFormat('yyyy-MM-dd').format(dates[dayIdx]);
-    final double centerX = left + (dayIdx * dayWidth) + (dayWidth / 2);
-    final double barW = (dayWidth * 0.85).clamp(10.0, 80.0);
+    final targetDate = dates[dayIdx];
 
-    // 1. 약 복용 점 체크
-    final rec = records.where((r) => r.date == dateStr).firstOrNull;
-    if (rec?.medications != null) {
-      for (var med in rec!.medications!) {
-        final unix = med['unix'] as int?;
-        final offset = med['offset'] as int?;
-        if (unix != null && offset != null) {
-          final dt = DateTime.fromMillisecondsSinceEpoch((unix + offset) * 1000, isUtc: true);
-          final y = topPadding + (((dt.hour + dt.minute / 60.0) / 24.0) * chartHeight);
-          if ((pos - Offset(centerX, y)).distance <= (barW * 0.6).clamp(15.0, 35.0)) return _HitInfo(id: unix.toString(), hitType: 'med', timeText: med['time'] as String, targetPos: Offset(centerX, y), displayDate: rec.date);
+    final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
+    final double centerX = (left + (dayIdx * dayWidth) + (dayWidth / 2)).roundToDouble();
+
+    final dayStartUnix = targetDate.millisecondsSinceEpoch ~/ 1000;
+    
+    for (var r in records) {
+      final type = types.firstWhere((t) => t.id == r.typeId, orElse: () => types[0]);
+      final rLocal = r.unixTimestamp + r.offsetSeconds;
+      final dayLocalStart = dayStartUnix + r.offsetSeconds;
+      
+      if (type.id == sleepType.id) {
+        int? endUnix;
+        if (r.value != null) {
+          try { endUnix = json.decode(r.value!)['endUnix'] as int?; } catch (_) { endUnix = int.tryParse(r.value!); }
         }
-      }
-    }
+        final sLocalEnd = (endUnix ?? r.unixTimestamp) + r.offsetSeconds;
+        
+        final drawStart = math.max(rLocal, dayLocalStart);
+        final drawEnd = math.min(sLocalEnd, dayLocalStart + 86400);
 
-    // 2. 수면 세션 체크 (실제 막대 영역만 판정)
-    final dayStartUnix = dates[dayIdx].millisecondsSinceEpoch ~/ 1000;
-    final dayLocalStart = dayStartUnix + DateTime.fromMillisecondsSinceEpoch(dayStartUnix * 1000).timeZoneOffset.inSeconds;
-    for (var s in sessions) {
-      final sLocalStart = s.startUnix + s.offsetSeconds;
-      final sLocalEnd = (s.endUnix ?? s.startUnix) + s.offsetSeconds;
-      final drawStart = math.max(sLocalStart, dayLocalStart);
-      final drawEnd = math.min(sLocalEnd, dayLocalStart + 86400);
-      if (drawStart < drawEnd) {
-        final double startY = topPadding + ((drawStart - dayLocalStart) / 86400.0) * chartHeight;
-        final double endY = topPadding + ((drawEnd - dayLocalStart) / 86400.0) * chartHeight;
-        if (pos.dx >= centerX - barW/2 && pos.dx <= centerX + barW/2 && pos.dy >= startY && pos.dy <= endY) {
-          final dtS = DateTime.fromMillisecondsSinceEpoch(sLocalStart * 1000, isUtc: true);
-          final dtE = DateTime.fromMillisecondsSinceEpoch(sLocalEnd * 1000, isUtc: true);
-          return _HitInfo(id: s.id.toString(), hitType: 'sleep', timeText: "${DateFormat('HH:mm').format(dtS)} ~ ${DateFormat('HH:mm').format(dtE)}", targetPos: Offset(centerX, pos.dy), displayDate: s.date);
+        if (drawStart < drawEnd) {
+          final double startY = metrics.topPadding + ((drawStart - dayLocalStart) / 86400.0) * chartHeight;
+          final double endY = metrics.topPadding + ((drawEnd - dayLocalStart) / 86400.0) * chartHeight;
+          
+          if (pos.dx >= centerX - metrics.barWidth/2 && pos.dx <= centerX + metrics.barWidth/2 && pos.dy >= startY && pos.dy <= endY) {
+            final dtS = DateTime.fromMillisecondsSinceEpoch(rLocal * 1000, isUtc: true);
+            final dtE = DateTime.fromMillisecondsSinceEpoch(sLocalEnd * 1000, isUtc: true);
+            final durationStr = "${(sLocalEnd - rLocal) ~/ 3600}시간 ${((sLocalEnd - rLocal) % 3600) ~/ 60}분";
+            return _HitInfo(
+              recordId: r.id,
+              hitType: 'sleep',
+              titleText: "수면 기록 삭제",
+              subtitleText: "기록 범위: ${DateFormat('HH:mm').format(dtS)} ~ ${DateFormat('HH:mm').format(dtE)} ($durationStr)",
+              targetPos: Offset(centerX, pos.dy),
+              displayDate: DateFormat('yyyy-MM-dd').format(targetDate),
+            );
+          }
+        }
+      } else {
+        if (rLocal >= dayLocalStart && rLocal < dayLocalStart + 86400) {
+          final double fractionalDay = (rLocal - dayLocalStart) / 86400.0;
+          final double y = metrics.topPadding + fractionalDay * chartHeight;
+          final double touchTargetRadius = (metrics.medRadius * 1.8).clamp(18.0, 50.0);
+          
+          if ((pos - Offset(centerX, y)).distance <= touchTargetRadius) {
+            final dt = DateTime.fromMillisecondsSinceEpoch(rLocal * 1000, isUtc: true);
+            final timeText = DateFormat('HH:mm').format(dt);
+            return _HitInfo(
+              recordId: r.id,
+              hitType: 'custom',
+              titleText: "${type.name} 기록 삭제",
+              subtitleText: "시각: $timeText\n내용: ${r.value ?? '단순 기록'}",
+              targetPos: Offset(centerX, y),
+              displayDate: DateFormat('yyyy-MM-dd').format(targetDate),
+            );
+          }
         }
       }
     }
@@ -465,128 +827,164 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
 
 class SleepTimelinePainter extends CustomPainter {
   final List<DateTime> allDates;
-  final List<DailySleepRecord> records;
-  final List<SleepSession> sessions;
+  final List<CustomDataRecord> records;
+  final List<CustomDataType> types;
   final bool isDarkMode;
   final double dayWidth;
   final bool showAllDetails;
   final double yAxisWidth;
 
-  SleepTimelinePainter({required this.allDates, required this.records, required this.sessions, required this.isDarkMode, required this.dayWidth, required this.showAllDetails, required this.yAxisWidth});
+  SleepTimelinePainter({
+    required this.allDates, 
+    required this.records, 
+    required this.types, 
+    required this.isDarkMode, 
+    required this.dayWidth, 
+    required this.showAllDetails, 
+    required this.yAxisWidth,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    const double topPadding = 60.0;
+    if (types.isEmpty) return;
+    final metrics = _ChartMetrics(dayWidth);
     const double bottomPadding = 30.0;
-    final double chartHeight = size.height - topPadding - bottomPadding;
+    final double chartHeight = size.height - metrics.topPadding - bottomPadding;
 
     final gridPaint = Paint()..color = isDarkMode ? Colors.white12 : Colors.black12..strokeWidth = 1;
-    final sleepPaint = Paint()..color = Colors.green.withValues(alpha: 0.7)..style = PaintingStyle.fill;
-    final medPaint = Paint()..color = Colors.indigo..style = PaintingStyle.fill;
-
-    final double barWidth = (dayWidth * 0.85).clamp(10.0, 80.0);
-    final double labelFontSize = (barWidth * 0.35).clamp(11.0, 20.0);
-    final double dateFontSize = (barWidth * 0.6).clamp(13.0, 36.0);
-    final double valueFontSize = (barWidth * 0.45).clamp(10.0, 24.0);
 
     for (int h = 0; h <= 24; h += 6) {
-      double y = topPadding + (h / 24.0) * chartHeight;
-      canvas.drawLine(Offset(yAxisWidth, y), Offset(size.width, y), gridPaint);
-      final tpYLabel = _getTextPainter("${h.toString().padLeft(2, '0')}:00", labelFontSize, Colors.grey);
-      canvas.save();
-      canvas.translate(yAxisWidth / 2, y);
-      canvas.rotate(math.pi / 2);
-      tpYLabel.paint(canvas, Offset(-tpYLabel.width / 2, -tpYLabel.height / 2));
-      canvas.restore();
+      double y = metrics.topPadding + (h / 24.0) * chartHeight;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
+
+    final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
 
     for (int i = 0; i < allDates.length; i++) {
       final date = allDates[i];
-      final dateStr = DateFormat('yyyy-MM-dd').format(date);
-      final double centerX = yAxisWidth + (i * dayWidth) + (dayWidth / 2);
+      final double centerX = (i * dayWidth) + (dayWidth / 2);
 
-      final tpLabel = _getTextPainter(DateFormat('E', 'ko_KR').format(date), labelFontSize, Colors.grey);
-      _drawTextWithPainter(canvas, tpLabel, Offset(centerX - tpLabel.width / 2, 5));
-      final tpDate = _getTextPainter(DateFormat('dd').format(date), dateFontSize, isDarkMode ? Colors.white : Colors.black, isBold: true);
-      _drawTextWithPainter(canvas, tpDate, Offset(centerX - tpDate.width / 2, 5 + labelFontSize + 4));
+      final tpLabel = _getTextPainter(DateFormat('E', 'ko_KR').format(date), metrics.labelFontSize, Colors.grey);
+      final tpDate = _getTextPainter(DateFormat('dd').format(date), metrics.dateFontSize, isDarkMode ? Colors.white : Colors.black, isBold: true);
+      
+      _drawTextWithPainter(canvas, tpLabel, Offset(centerX - tpLabel.width / 2, 0));
+      _drawTextWithPainter(canvas, tpDate, Offset(centerX - tpDate.width / 2, tpLabel.height - 4.0));
 
-      canvas.drawLine(Offset(centerX, topPadding), Offset(centerX, topPadding + chartHeight), gridPaint);
+      canvas.drawLine(Offset(centerX, metrics.topPadding), Offset(centerX, metrics.topPadding + chartHeight), gridPaint);
 
       final dayStartUnix = date.millisecondsSinceEpoch ~/ 1000;
-      final dayLocalStart = dayStartUnix + DateTime.fromMillisecondsSinceEpoch(dayStartUnix * 1000).timeZoneOffset.inSeconds;
       final List<math.Rectangle<double>> occupiedAreas = [];
 
-      final record = records.where((r) => r.date == dateStr).firstOrNull;
-      if (record?.medications != null) {
-        for (var med in record!.medications!) {
-          final int? unix = med['unix'] as int?;
-          final int? offset = med['offset'] as int?;
-          if (unix != null && offset != null) {
-            final dt = DateTime.fromMillisecondsSinceEpoch((unix + offset) * 1000, isUtc: true);
-            double medY = topPadding + ((dt.hour + dt.minute / 60.0) / 24.0) * chartHeight;
-            double r = barWidth / 2;
-            
-            canvas.drawCircle(Offset(centerX, medY), r, Paint()..color = isDarkMode ? Colors.black : Colors.white);
-            canvas.drawCircle(Offset(centerX, medY), r - 1.5, medPaint);
-            occupiedAreas.add(math.Rectangle(centerX - r, medY - r, barWidth, r * 2));
-            if (showAllDetails) {
-              final tp = _getTextPainter(med['time'] as String, valueFontSize, Colors.indigoAccent, isVertical: true);
-              bool isAbove = true;
-              double textY = medY - r - 5;
-              if (textY - tp.width < topPadding) { isAbove = false; textY = medY + r + 5; }
-              _drawVerticalTextWithPainter(canvas, tp, Offset(centerX, textY), isAbove: isAbove);
-              occupiedAreas.add(math.Rectangle(centerX - tp.height/2, isAbove ? textY - tp.width : textY, tp.height, tp.width));
-            }
-          }
-        }
-      }
+      final dayRecords = records.where((r) {
+        final localUnix = r.unixTimestamp + r.offsetSeconds;
+        final dayLocalStart = dayStartUnix + r.offsetSeconds;
+        return localUnix >= dayLocalStart && localUnix < dayLocalStart + 86400;
+      }).toList();
 
-      for (var s in sessions) {
-        final sLocalStart = s.startUnix + s.offsetSeconds;
-        final sLocalEnd = (s.endUnix ?? s.startUnix) + s.offsetSeconds;
+      final sleepPaints = dayRecords.where((r) => r.typeId == sleepType.id).toList();
+      final sleepPaint = Paint()..color = Color(sleepType.colorValue ?? 0xFF4CAF50).withOpacity(0.7)..style = PaintingStyle.fill;
+
+      for (var r in sleepPaints) {
+        final sLocalStart = r.unixTimestamp + r.offsetSeconds;
+        final dayLocalStart = dayStartUnix + r.offsetSeconds;
+        
+        int? endUnix;
+        if (r.value != null) {
+          try { endUnix = json.decode(r.value!)['endUnix'] as int?; } catch (_) { endUnix = int.tryParse(r.value!); }
+        }
+        final sLocalEnd = (endUnix ?? r.unixTimestamp) + r.offsetSeconds;
+        
         final drawStart = math.max(sLocalStart, dayLocalStart);
         final drawEnd = math.min(sLocalEnd, dayLocalStart + 86400);
 
         if (drawStart < drawEnd) {
-          final double startY = topPadding + ((drawStart - dayLocalStart) / 86400.0) * chartHeight;
-          final double endY = topPadding + ((drawEnd - dayLocalStart) / 86400.0) * chartHeight;
-          final double cornerRadius = barWidth / 2;
+          final double startY = metrics.topPadding + ((drawStart - dayLocalStart) / 86400.0) * chartHeight;
+          final double endY = metrics.topPadding + ((drawEnd - dayLocalStart) / 86400.0) * chartHeight;
+          final double cornerRadius = metrics.barWidth / 2;
 
-          canvas.drawRRect(RRect.fromRectAndCorners(Rect.fromLTRB(centerX - barWidth/2, startY, centerX + barWidth/2, endY), topLeft: sLocalStart >= dayLocalStart ? Radius.circular(cornerRadius) : Radius.zero, topRight: sLocalStart >= dayLocalStart ? Radius.circular(cornerRadius) : Radius.zero, bottomLeft: sLocalEnd <= dayLocalStart + 86400 ? Radius.circular(cornerRadius) : Radius.zero, bottomRight: sLocalEnd <= dayLocalStart + 86400 ? Radius.circular(cornerRadius) : Radius.zero), sleepPaint);
+          canvas.drawRRect(RRect.fromRectAndCorners(
+            Rect.fromLTRB(centerX - metrics.barWidth/2, startY, centerX + metrics.barWidth/2, endY), 
+            topLeft: sLocalStart >= dayLocalStart ? Radius.circular(cornerRadius) : Radius.zero, 
+            topRight: sLocalStart >= dayLocalStart ? Radius.circular(cornerRadius) : Radius.zero, 
+            bottomLeft: sLocalEnd <= dayLocalStart + 86400 ? Radius.circular(cornerRadius) : Radius.zero, 
+            bottomRight: sLocalEnd <= dayLocalStart + 86400 ? Radius.circular(cornerRadius) : Radius.zero
+          ), sleepPaint);
 
           if (showAllDetails) {
-            final tpS = _getTextPainter(_formatUnix(s.startUnix, s.offsetSeconds), valueFontSize, isDarkMode ? Colors.white70 : Colors.black87, isVertical: true);
-            final tpE = _getTextPainter(_formatUnix(s.endUnix, s.offsetSeconds), valueFontSize, isDarkMode ? Colors.white70 : Colors.black87, isVertical: true);
+            final tpS = _getTextPainter(_formatUnix(r.unixTimestamp, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
+            final tpE = _getTextPainter(_formatUnix(endUnix, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
             bool barFitsLabels = (endY - startY) > (tpS.width + tpE.width + 20);
 
             if (sLocalStart >= dayLocalStart) {
-              double proposedY = barFitsLabels ? startY + (valueFontSize * 0.9) : startY - 5;
+              double proposedY = barFitsLabels ? startY + (metrics.valueFontSize * 0.9) : startY - 5;
               bool proposedAbove = !barFitsLabels;
               math.Rectangle rect = math.Rectangle(centerX - tpS.height/2, proposedAbove ? proposedY - tpS.width : proposedY, tpS.height, tpS.width);
               bool collision = false;
-              for (var area in occupiedAreas) if (rect.intersects(area)) { collision = true; break; }
-              if (proposedAbove && (proposedY - tpS.width < topPadding || collision)) { proposedY = startY + (valueFontSize * 0.9); proposedAbove = false; }
+              for (var area in occupiedAreas) {
+                if (rect.intersects(area)) { collision = true; break; }
+              }
+              if (proposedAbove && (proposedY - tpS.width < metrics.topPadding || collision)) { proposedY = startY + (metrics.valueFontSize * 0.9); proposedAbove = false; }
               _drawVerticalTextWithPainter(canvas, tpS, Offset(centerX, proposedY), isAbove: proposedAbove);
               occupiedAreas.add(math.Rectangle(centerX - tpS.height/2, proposedAbove ? proposedY - tpS.width : proposedY, tpS.height, tpS.width));
             }
 
             if (sLocalEnd <= dayLocalStart + 86400) {
-              double proposedY = barFitsLabels ? endY - (valueFontSize * 0.9) : endY + 5;
+              double proposedY = barFitsLabels ? endY - (metrics.valueFontSize * 0.9) : endY + 5;
               bool proposedAbove = barFitsLabels;
               math.Rectangle rect = math.Rectangle(centerX - tpE.height/2, proposedAbove ? proposedY - tpE.width : proposedY, tpE.height, tpE.width);
               bool collision = false;
-              for (var area in occupiedAreas) if (rect.intersects(area)) { collision = true; break; }
-              if (!proposedAbove && (proposedY + tpE.width > (topPadding + chartHeight) || collision)) { proposedY = endY - (valueFontSize * 0.9); proposedAbove = true; }
+              for (var area in occupiedAreas) {
+                if (rect.intersects(area)) { collision = true; break; }
+              }
+              if (!proposedAbove && (proposedY + tpE.width > (metrics.topPadding + chartHeight) || collision)) { proposedY = endY - (metrics.valueFontSize * 0.9); proposedAbove = true; }
               _drawVerticalTextWithPainter(canvas, tpE, Offset(centerX, proposedY), isAbove: proposedAbove);
               occupiedAreas.add(math.Rectangle(centerX - tpE.height/2, proposedAbove ? proposedY - tpE.width : proposedY, tpE.height, tpE.width));
             }
           }
         }
       }
+
+      final customPaints = dayRecords.where((r) => r.typeId != sleepType.id).toList();
+
+      for (var r in customPaints) {
+        final type = types.firstWhere((t) => t.id == r.typeId, orElse: () => types[0]);
+        final typeColor = Color(type.colorValue ?? 0xFF3F51B5);
+        final medPaint = Paint()..color = typeColor..style = PaintingStyle.fill;
+
+        final rLocal = r.unixTimestamp + r.offsetSeconds;
+        final dayLocalStart = dayStartUnix + r.offsetSeconds;
+        final double fractionalDay = (rLocal - dayLocalStart) / 86400.0;
+        final double medY = metrics.topPadding + fractionalDay * chartHeight;
+
+        canvas.drawCircle(Offset(centerX, medY), metrics.medRadius, medPaint);
+        occupiedAreas.add(math.Rectangle(centerX - metrics.medRadius, medY - metrics.medRadius, metrics.medRadius * 2, metrics.medRadius * 2));
+
+        if (showAllDetails) {
+          final dt = DateTime.fromMillisecondsSinceEpoch(rLocal * 1000, isUtc: true);
+          final timeStr = DateFormat('HH:mm').format(dt);
+          
+          String txt = timeStr;
+          if (r.value != null && r.value!.trim().isNotEmpty) {
+            txt = "${type.name}: ${r.value}";
+          }
+          
+          final tp = _getTextPainter(txt, metrics.valueFontSize * 0.95, typeColor.withOpacity(0.9), isBold: r.value != null);
+          
+          bool isAbove = true;
+          double textY = medY - metrics.medRadius - 5;
+          if (textY - tp.width < metrics.topPadding) { 
+            isAbove = false; 
+            textY = medY + metrics.medRadius + 5; 
+          }
+          
+          _drawVerticalTextWithPainter(canvas, tp, Offset(centerX, textY), isAbove: isAbove);
+          occupiedAreas.add(math.Rectangle(centerX - tp.height/2, isAbove ? textY - tp.width : textY, tp.height, tp.width));
+        }
+      }
     }
   }
 
-  TextPainter _getTextPainter(String text, double fontSize, Color color, {bool isBold = false, bool isVertical = false}) {
+  TextPainter _getTextPainter(String text, double fontSize, Color color, {bool isBold = false}) {
     return TextPainter(text: TextSpan(text: text, style: TextStyle(color: color, fontSize: fontSize, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)), textDirection: ui.TextDirection.ltr)..layout();
   }
 
@@ -604,11 +1002,6 @@ class SleepTimelinePainter extends CustomPainter {
     if (unix == null) return "--:--";
     final dt = DateTime.fromMillisecondsSinceEpoch((unix + offset) * 1000, isUtc: true);
     return DateFormat('HH:mm').format(dt);
-  }
-
-  void _drawText(Canvas canvas, String text, Offset offset, double fontSize, Color color, {bool isBold = false}) {
-    final tp = _getTextPainter(text, fontSize, color, isBold: isBold);
-    tp.paint(canvas, offset);
   }
 
   @override

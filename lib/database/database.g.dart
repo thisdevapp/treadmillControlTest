@@ -3,6 +3,223 @@
 part of 'database.dart';
 
 // ignore_for_file: type=lint
+class $AppMetadataTable extends AppMetadata
+    with TableInfo<$AppMetadataTable, AppMetadataData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AppMetadataTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _keyMeta = const VerificationMeta('key');
+  @override
+  late final GeneratedColumn<String> key = GeneratedColumn<String>(
+    'key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _valueMeta = const VerificationMeta('value');
+  @override
+  late final GeneratedColumn<String> value = GeneratedColumn<String>(
+    'value',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [key, value];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'app_metadata';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<AppMetadataData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('key')) {
+      context.handle(
+        _keyMeta,
+        key.isAcceptableOrUnknown(data['key']!, _keyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_keyMeta);
+    }
+    if (data.containsKey('value')) {
+      context.handle(
+        _valueMeta,
+        value.isAcceptableOrUnknown(data['value']!, _valueMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {key};
+  @override
+  AppMetadataData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AppMetadataData(
+      key:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.string,
+            data['${effectivePrefix}key'],
+          )!,
+      value: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}value'],
+      ),
+    );
+  }
+
+  @override
+  $AppMetadataTable createAlias(String alias) {
+    return $AppMetadataTable(attachedDatabase, alias);
+  }
+}
+
+class AppMetadataData extends DataClass implements Insertable<AppMetadataData> {
+  final String key;
+  final String? value;
+  const AppMetadataData({required this.key, this.value});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['key'] = Variable<String>(key);
+    if (!nullToAbsent || value != null) {
+      map['value'] = Variable<String>(value);
+    }
+    return map;
+  }
+
+  AppMetadataCompanion toCompanion(bool nullToAbsent) {
+    return AppMetadataCompanion(
+      key: Value(key),
+      value:
+          value == null && nullToAbsent ? const Value.absent() : Value(value),
+    );
+  }
+
+  factory AppMetadataData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AppMetadataData(
+      key: serializer.fromJson<String>(json['key']),
+      value: serializer.fromJson<String?>(json['value']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'key': serializer.toJson<String>(key),
+      'value': serializer.toJson<String?>(value),
+    };
+  }
+
+  AppMetadataData copyWith({
+    String? key,
+    Value<String?> value = const Value.absent(),
+  }) => AppMetadataData(
+    key: key ?? this.key,
+    value: value.present ? value.value : this.value,
+  );
+  AppMetadataData copyWithCompanion(AppMetadataCompanion data) {
+    return AppMetadataData(
+      key: data.key.present ? data.key.value : this.key,
+      value: data.value.present ? data.value.value : this.value,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AppMetadataData(')
+          ..write('key: $key, ')
+          ..write('value: $value')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(key, value);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AppMetadataData &&
+          other.key == this.key &&
+          other.value == this.value);
+}
+
+class AppMetadataCompanion extends UpdateCompanion<AppMetadataData> {
+  final Value<String> key;
+  final Value<String?> value;
+  final Value<int> rowid;
+  const AppMetadataCompanion({
+    this.key = const Value.absent(),
+    this.value = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AppMetadataCompanion.insert({
+    required String key,
+    this.value = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : key = Value(key);
+  static Insertable<AppMetadataData> custom({
+    Expression<String>? key,
+    Expression<String>? value,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (key != null) 'key': key,
+      if (value != null) 'value': value,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AppMetadataCompanion copyWith({
+    Value<String>? key,
+    Value<String?>? value,
+    Value<int>? rowid,
+  }) {
+    return AppMetadataCompanion(
+      key: key ?? this.key,
+      value: value ?? this.value,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (key.present) {
+      map['key'] = Variable<String>(key.value);
+    }
+    if (value.present) {
+      map['value'] = Variable<String>(value.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AppMetadataCompanion(')
+          ..write('key: $key, ')
+          ..write('value: $value, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $CustomDataTypesTable extends CustomDataTypes
     with TableInfo<$CustomDataTypesTable, CustomDataType> {
   @override
@@ -72,6 +289,50 @@ class $CustomDataTypesTable extends CustomDataTypes
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _gridXMeta = const VerificationMeta('gridX');
+  @override
+  late final GeneratedColumn<int> gridX = GeneratedColumn<int>(
+    'grid_x',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _gridYMeta = const VerificationMeta('gridY');
+  @override
+  late final GeneratedColumn<int> gridY = GeneratedColumn<int>(
+    'grid_y',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _gridWidthMeta = const VerificationMeta(
+    'gridWidth',
+  );
+  @override
+  late final GeneratedColumn<int> gridWidth = GeneratedColumn<int>(
+    'grid_width',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _gridHeightMeta = const VerificationMeta(
+    'gridHeight',
+  );
+  @override
+  late final GeneratedColumn<int> gridHeight = GeneratedColumn<int>(
+    'grid_height',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -79,6 +340,10 @@ class $CustomDataTypesTable extends CustomDataTypes
     iconName,
     colorValue,
     isPreset,
+    gridX,
+    gridY,
+    gridWidth,
+    gridHeight,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -121,6 +386,30 @@ class $CustomDataTypesTable extends CustomDataTypes
         isPreset.isAcceptableOrUnknown(data['is_preset']!, _isPresetMeta),
       );
     }
+    if (data.containsKey('grid_x')) {
+      context.handle(
+        _gridXMeta,
+        gridX.isAcceptableOrUnknown(data['grid_x']!, _gridXMeta),
+      );
+    }
+    if (data.containsKey('grid_y')) {
+      context.handle(
+        _gridYMeta,
+        gridY.isAcceptableOrUnknown(data['grid_y']!, _gridYMeta),
+      );
+    }
+    if (data.containsKey('grid_width')) {
+      context.handle(
+        _gridWidthMeta,
+        gridWidth.isAcceptableOrUnknown(data['grid_width']!, _gridWidthMeta),
+      );
+    }
+    if (data.containsKey('grid_height')) {
+      context.handle(
+        _gridHeightMeta,
+        gridHeight.isAcceptableOrUnknown(data['grid_height']!, _gridHeightMeta),
+      );
+    }
     return context;
   }
 
@@ -153,6 +442,26 @@ class $CustomDataTypesTable extends CustomDataTypes
             DriftSqlType.bool,
             data['${effectivePrefix}is_preset'],
           )!,
+      gridX:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.int,
+            data['${effectivePrefix}grid_x'],
+          )!,
+      gridY:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.int,
+            data['${effectivePrefix}grid_y'],
+          )!,
+      gridWidth:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.int,
+            data['${effectivePrefix}grid_width'],
+          )!,
+      gridHeight:
+          attachedDatabase.typeMapping.read(
+            DriftSqlType.int,
+            data['${effectivePrefix}grid_height'],
+          )!,
     );
   }
 
@@ -168,12 +477,20 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
   final String? iconName;
   final int? colorValue;
   final bool isPreset;
+  final int gridX;
+  final int gridY;
+  final int gridWidth;
+  final int gridHeight;
   const CustomDataType({
     required this.id,
     required this.name,
     this.iconName,
     this.colorValue,
     required this.isPreset,
+    required this.gridX,
+    required this.gridY,
+    required this.gridWidth,
+    required this.gridHeight,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -187,6 +504,10 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
       map['color_value'] = Variable<int>(colorValue);
     }
     map['is_preset'] = Variable<bool>(isPreset);
+    map['grid_x'] = Variable<int>(gridX);
+    map['grid_y'] = Variable<int>(gridY);
+    map['grid_width'] = Variable<int>(gridWidth);
+    map['grid_height'] = Variable<int>(gridHeight);
     return map;
   }
 
@@ -203,6 +524,10 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
               ? const Value.absent()
               : Value(colorValue),
       isPreset: Value(isPreset),
+      gridX: Value(gridX),
+      gridY: Value(gridY),
+      gridWidth: Value(gridWidth),
+      gridHeight: Value(gridHeight),
     );
   }
 
@@ -217,6 +542,10 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
       iconName: serializer.fromJson<String?>(json['iconName']),
       colorValue: serializer.fromJson<int?>(json['colorValue']),
       isPreset: serializer.fromJson<bool>(json['isPreset']),
+      gridX: serializer.fromJson<int>(json['gridX']),
+      gridY: serializer.fromJson<int>(json['gridY']),
+      gridWidth: serializer.fromJson<int>(json['gridWidth']),
+      gridHeight: serializer.fromJson<int>(json['gridHeight']),
     );
   }
   @override
@@ -228,6 +557,10 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
       'iconName': serializer.toJson<String?>(iconName),
       'colorValue': serializer.toJson<int?>(colorValue),
       'isPreset': serializer.toJson<bool>(isPreset),
+      'gridX': serializer.toJson<int>(gridX),
+      'gridY': serializer.toJson<int>(gridY),
+      'gridWidth': serializer.toJson<int>(gridWidth),
+      'gridHeight': serializer.toJson<int>(gridHeight),
     };
   }
 
@@ -237,12 +570,20 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
     Value<String?> iconName = const Value.absent(),
     Value<int?> colorValue = const Value.absent(),
     bool? isPreset,
+    int? gridX,
+    int? gridY,
+    int? gridWidth,
+    int? gridHeight,
   }) => CustomDataType(
     id: id ?? this.id,
     name: name ?? this.name,
     iconName: iconName.present ? iconName.value : this.iconName,
     colorValue: colorValue.present ? colorValue.value : this.colorValue,
     isPreset: isPreset ?? this.isPreset,
+    gridX: gridX ?? this.gridX,
+    gridY: gridY ?? this.gridY,
+    gridWidth: gridWidth ?? this.gridWidth,
+    gridHeight: gridHeight ?? this.gridHeight,
   );
   CustomDataType copyWithCompanion(CustomDataTypesCompanion data) {
     return CustomDataType(
@@ -252,6 +593,11 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
       colorValue:
           data.colorValue.present ? data.colorValue.value : this.colorValue,
       isPreset: data.isPreset.present ? data.isPreset.value : this.isPreset,
+      gridX: data.gridX.present ? data.gridX.value : this.gridX,
+      gridY: data.gridY.present ? data.gridY.value : this.gridY,
+      gridWidth: data.gridWidth.present ? data.gridWidth.value : this.gridWidth,
+      gridHeight:
+          data.gridHeight.present ? data.gridHeight.value : this.gridHeight,
     );
   }
 
@@ -262,13 +608,27 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
           ..write('name: $name, ')
           ..write('iconName: $iconName, ')
           ..write('colorValue: $colorValue, ')
-          ..write('isPreset: $isPreset')
+          ..write('isPreset: $isPreset, ')
+          ..write('gridX: $gridX, ')
+          ..write('gridY: $gridY, ')
+          ..write('gridWidth: $gridWidth, ')
+          ..write('gridHeight: $gridHeight')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, iconName, colorValue, isPreset);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    iconName,
+    colorValue,
+    isPreset,
+    gridX,
+    gridY,
+    gridWidth,
+    gridHeight,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -277,7 +637,11 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
           other.name == this.name &&
           other.iconName == this.iconName &&
           other.colorValue == this.colorValue &&
-          other.isPreset == this.isPreset);
+          other.isPreset == this.isPreset &&
+          other.gridX == this.gridX &&
+          other.gridY == this.gridY &&
+          other.gridWidth == this.gridWidth &&
+          other.gridHeight == this.gridHeight);
 }
 
 class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
@@ -286,12 +650,20 @@ class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
   final Value<String?> iconName;
   final Value<int?> colorValue;
   final Value<bool> isPreset;
+  final Value<int> gridX;
+  final Value<int> gridY;
+  final Value<int> gridWidth;
+  final Value<int> gridHeight;
   const CustomDataTypesCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.iconName = const Value.absent(),
     this.colorValue = const Value.absent(),
     this.isPreset = const Value.absent(),
+    this.gridX = const Value.absent(),
+    this.gridY = const Value.absent(),
+    this.gridWidth = const Value.absent(),
+    this.gridHeight = const Value.absent(),
   });
   CustomDataTypesCompanion.insert({
     this.id = const Value.absent(),
@@ -299,6 +671,10 @@ class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
     this.iconName = const Value.absent(),
     this.colorValue = const Value.absent(),
     this.isPreset = const Value.absent(),
+    this.gridX = const Value.absent(),
+    this.gridY = const Value.absent(),
+    this.gridWidth = const Value.absent(),
+    this.gridHeight = const Value.absent(),
   }) : name = Value(name);
   static Insertable<CustomDataType> custom({
     Expression<int>? id,
@@ -306,6 +682,10 @@ class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
     Expression<String>? iconName,
     Expression<int>? colorValue,
     Expression<bool>? isPreset,
+    Expression<int>? gridX,
+    Expression<int>? gridY,
+    Expression<int>? gridWidth,
+    Expression<int>? gridHeight,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -313,6 +693,10 @@ class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
       if (iconName != null) 'icon_name': iconName,
       if (colorValue != null) 'color_value': colorValue,
       if (isPreset != null) 'is_preset': isPreset,
+      if (gridX != null) 'grid_x': gridX,
+      if (gridY != null) 'grid_y': gridY,
+      if (gridWidth != null) 'grid_width': gridWidth,
+      if (gridHeight != null) 'grid_height': gridHeight,
     });
   }
 
@@ -322,6 +706,10 @@ class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
     Value<String?>? iconName,
     Value<int?>? colorValue,
     Value<bool>? isPreset,
+    Value<int>? gridX,
+    Value<int>? gridY,
+    Value<int>? gridWidth,
+    Value<int>? gridHeight,
   }) {
     return CustomDataTypesCompanion(
       id: id ?? this.id,
@@ -329,6 +717,10 @@ class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
       iconName: iconName ?? this.iconName,
       colorValue: colorValue ?? this.colorValue,
       isPreset: isPreset ?? this.isPreset,
+      gridX: gridX ?? this.gridX,
+      gridY: gridY ?? this.gridY,
+      gridWidth: gridWidth ?? this.gridWidth,
+      gridHeight: gridHeight ?? this.gridHeight,
     );
   }
 
@@ -350,6 +742,18 @@ class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
     if (isPreset.present) {
       map['is_preset'] = Variable<bool>(isPreset.value);
     }
+    if (gridX.present) {
+      map['grid_x'] = Variable<int>(gridX.value);
+    }
+    if (gridY.present) {
+      map['grid_y'] = Variable<int>(gridY.value);
+    }
+    if (gridWidth.present) {
+      map['grid_width'] = Variable<int>(gridWidth.value);
+    }
+    if (gridHeight.present) {
+      map['grid_height'] = Variable<int>(gridHeight.value);
+    }
     return map;
   }
 
@@ -360,7 +764,11 @@ class CustomDataTypesCompanion extends UpdateCompanion<CustomDataType> {
           ..write('name: $name, ')
           ..write('iconName: $iconName, ')
           ..write('colorValue: $colorValue, ')
-          ..write('isPreset: $isPreset')
+          ..write('isPreset: $isPreset, ')
+          ..write('gridX: $gridX, ')
+          ..write('gridY: $gridY, ')
+          ..write('gridWidth: $gridWidth, ')
+          ..write('gridHeight: $gridHeight')
           ..write(')'))
         .toString();
   }
@@ -782,6 +1190,7 @@ class CustomDataRecordsCompanion extends UpdateCompanion<CustomDataRecord> {
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
+  late final $AppMetadataTable appMetadata = $AppMetadataTable(this);
   late final $CustomDataTypesTable customDataTypes = $CustomDataTypesTable(
     this,
   );
@@ -792,11 +1201,159 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
+    appMetadata,
     customDataTypes,
     customDataRecords,
   ];
 }
 
+typedef $$AppMetadataTableCreateCompanionBuilder =
+    AppMetadataCompanion Function({
+      required String key,
+      Value<String?> value,
+      Value<int> rowid,
+    });
+typedef $$AppMetadataTableUpdateCompanionBuilder =
+    AppMetadataCompanion Function({
+      Value<String> key,
+      Value<String?> value,
+      Value<int> rowid,
+    });
+
+class $$AppMetadataTableFilterComposer
+    extends Composer<_$AppDatabase, $AppMetadataTable> {
+  $$AppMetadataTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get value => $composableBuilder(
+    column: $table.value,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AppMetadataTableOrderingComposer
+    extends Composer<_$AppDatabase, $AppMetadataTable> {
+  $$AppMetadataTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get value => $composableBuilder(
+    column: $table.value,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AppMetadataTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AppMetadataTable> {
+  $$AppMetadataTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get key =>
+      $composableBuilder(column: $table.key, builder: (column) => column);
+
+  GeneratedColumn<String> get value =>
+      $composableBuilder(column: $table.value, builder: (column) => column);
+}
+
+class $$AppMetadataTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $AppMetadataTable,
+          AppMetadataData,
+          $$AppMetadataTableFilterComposer,
+          $$AppMetadataTableOrderingComposer,
+          $$AppMetadataTableAnnotationComposer,
+          $$AppMetadataTableCreateCompanionBuilder,
+          $$AppMetadataTableUpdateCompanionBuilder,
+          (
+            AppMetadataData,
+            BaseReferences<_$AppDatabase, $AppMetadataTable, AppMetadataData>,
+          ),
+          AppMetadataData,
+          PrefetchHooks Function()
+        > {
+  $$AppMetadataTableTableManager(_$AppDatabase db, $AppMetadataTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer:
+              () => $$AppMetadataTableFilterComposer($db: db, $table: table),
+          createOrderingComposer:
+              () => $$AppMetadataTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer:
+              () =>
+                  $$AppMetadataTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> key = const Value.absent(),
+                Value<String?> value = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AppMetadataCompanion(key: key, value: value, rowid: rowid),
+          createCompanionCallback:
+              ({
+                required String key,
+                Value<String?> value = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AppMetadataCompanion.insert(
+                key: key,
+                value: value,
+                rowid: rowid,
+              ),
+          withReferenceMapper:
+              (p0) =>
+                  p0
+                      .map(
+                        (e) => (
+                          e.readTable(table),
+                          BaseReferences(db, table, e),
+                        ),
+                      )
+                      .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AppMetadataTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $AppMetadataTable,
+      AppMetadataData,
+      $$AppMetadataTableFilterComposer,
+      $$AppMetadataTableOrderingComposer,
+      $$AppMetadataTableAnnotationComposer,
+      $$AppMetadataTableCreateCompanionBuilder,
+      $$AppMetadataTableUpdateCompanionBuilder,
+      (
+        AppMetadataData,
+        BaseReferences<_$AppDatabase, $AppMetadataTable, AppMetadataData>,
+      ),
+      AppMetadataData,
+      PrefetchHooks Function()
+    >;
 typedef $$CustomDataTypesTableCreateCompanionBuilder =
     CustomDataTypesCompanion Function({
       Value<int> id,
@@ -804,6 +1361,10 @@ typedef $$CustomDataTypesTableCreateCompanionBuilder =
       Value<String?> iconName,
       Value<int?> colorValue,
       Value<bool> isPreset,
+      Value<int> gridX,
+      Value<int> gridY,
+      Value<int> gridWidth,
+      Value<int> gridHeight,
     });
 typedef $$CustomDataTypesTableUpdateCompanionBuilder =
     CustomDataTypesCompanion Function({
@@ -812,6 +1373,10 @@ typedef $$CustomDataTypesTableUpdateCompanionBuilder =
       Value<String?> iconName,
       Value<int?> colorValue,
       Value<bool> isPreset,
+      Value<int> gridX,
+      Value<int> gridY,
+      Value<int> gridWidth,
+      Value<int> gridHeight,
     });
 
 final class $$CustomDataTypesTableReferences
@@ -882,6 +1447,26 @@ class $$CustomDataTypesTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get gridX => $composableBuilder(
+    column: $table.gridX,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get gridY => $composableBuilder(
+    column: $table.gridY,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get gridWidth => $composableBuilder(
+    column: $table.gridWidth,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get gridHeight => $composableBuilder(
+    column: $table.gridHeight,
+    builder: (column) => ColumnFilters(column),
+  );
+
   Expression<bool> customDataRecordsRefs(
     Expression<bool> Function($$CustomDataRecordsTableFilterComposer f) f,
   ) {
@@ -941,6 +1526,26 @@ class $$CustomDataTypesTableOrderingComposer
     column: $table.isPreset,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get gridX => $composableBuilder(
+    column: $table.gridX,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get gridY => $composableBuilder(
+    column: $table.gridY,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get gridWidth => $composableBuilder(
+    column: $table.gridWidth,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get gridHeight => $composableBuilder(
+    column: $table.gridHeight,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CustomDataTypesTableAnnotationComposer
@@ -968,6 +1573,20 @@ class $$CustomDataTypesTableAnnotationComposer
 
   GeneratedColumn<bool> get isPreset =>
       $composableBuilder(column: $table.isPreset, builder: (column) => column);
+
+  GeneratedColumn<int> get gridX =>
+      $composableBuilder(column: $table.gridX, builder: (column) => column);
+
+  GeneratedColumn<int> get gridY =>
+      $composableBuilder(column: $table.gridY, builder: (column) => column);
+
+  GeneratedColumn<int> get gridWidth =>
+      $composableBuilder(column: $table.gridWidth, builder: (column) => column);
+
+  GeneratedColumn<int> get gridHeight => $composableBuilder(
+    column: $table.gridHeight,
+    builder: (column) => column,
+  );
 
   Expression<T> customDataRecordsRefs<T extends Object>(
     Expression<T> Function($$CustomDataRecordsTableAnnotationComposer a) f,
@@ -1038,12 +1657,20 @@ class $$CustomDataTypesTableTableManager
                 Value<String?> iconName = const Value.absent(),
                 Value<int?> colorValue = const Value.absent(),
                 Value<bool> isPreset = const Value.absent(),
+                Value<int> gridX = const Value.absent(),
+                Value<int> gridY = const Value.absent(),
+                Value<int> gridWidth = const Value.absent(),
+                Value<int> gridHeight = const Value.absent(),
               }) => CustomDataTypesCompanion(
                 id: id,
                 name: name,
                 iconName: iconName,
                 colorValue: colorValue,
                 isPreset: isPreset,
+                gridX: gridX,
+                gridY: gridY,
+                gridWidth: gridWidth,
+                gridHeight: gridHeight,
               ),
           createCompanionCallback:
               ({
@@ -1052,12 +1679,20 @@ class $$CustomDataTypesTableTableManager
                 Value<String?> iconName = const Value.absent(),
                 Value<int?> colorValue = const Value.absent(),
                 Value<bool> isPreset = const Value.absent(),
+                Value<int> gridX = const Value.absent(),
+                Value<int> gridY = const Value.absent(),
+                Value<int> gridWidth = const Value.absent(),
+                Value<int> gridHeight = const Value.absent(),
               }) => CustomDataTypesCompanion.insert(
                 id: id,
                 name: name,
                 iconName: iconName,
                 colorValue: colorValue,
                 isPreset: isPreset,
+                gridX: gridX,
+                gridY: gridY,
+                gridWidth: gridWidth,
+                gridHeight: gridHeight,
               ),
           withReferenceMapper:
               (p0) =>
@@ -1486,6 +2121,8 @@ typedef $$CustomDataRecordsTableProcessedTableManager =
 class $AppDatabaseManager {
   final _$AppDatabase _db;
   $AppDatabaseManager(this._db);
+  $$AppMetadataTableTableManager get appMetadata =>
+      $$AppMetadataTableTableManager(_db, _db.appMetadata);
   $$CustomDataTypesTableTableManager get customDataTypes =>
       $$CustomDataTypesTableTableManager(_db, _db.customDataTypes);
   $$CustomDataRecordsTableTableManager get customDataRecords =>

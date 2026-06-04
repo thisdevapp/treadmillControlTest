@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:drift/drift.dart' show Value;
@@ -26,14 +27,33 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   double _longPressSeconds = 4.0;
-  DateTime _selectedDate = DateTime.now();
+  bool _isEditMode = false;
 
-  final List<String> _titles = ["기록 일지", "수면 통계", "환경 설정"];
+  // 드래그 및 리사이즈 상태 관리
+  int? _activeId;
+  bool _isResizing = false;
+  double _dragX = 0;
+  double _dragY = 0;
+  double _startGlobalX = 0;
+  double _startGlobalY = 0;
+  int _startGridW = 1;
+  int _startGridH = 1;
+  int _ghostX = 0;
+  int _ghostY = 0;
+  int _ghostW = 1;
+  int _ghostH = 1;
+
+  final List<String> _titles = ["기록 대시보드", "통계 분석", "환경 설정"];
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+  }
+
+  Future<void> _checkDataIntegrity() async {
+    final columns = MediaQuery.of(context).size.width > 600 ? 6 : 4;
+    await widget.database.fixDataIntegrity(columns: columns);
   }
 
   Future<void> _loadSettings() async {
@@ -53,160 +73,628 @@ class _MainScreenState extends State<MainScreen> {
 
   IconData _getIconData(String? name) {
     switch (name) {
-      case 'hotel': return Icons.hotel;
-      case 'medication': return Icons.medication;
-      case 'coffee': return Icons.local_cafe;
-      case 'smoke': return Icons.smoking_rooms;
-      case 'sports': return Icons.directions_run;
-      case 'beer': return Icons.local_bar;
-      case 'star': return Icons.star;
-      case 'favorite': return Icons.favorite;
-      case 'mood': return Icons.mood;
-      default: return Icons.category;
+      case 'hotel': return Icons.hotel_rounded;
+      case 'medication': return Icons.medication_rounded;
+      case 'coffee': return Icons.local_cafe_rounded;
+      case 'smoke': return Icons.smoking_rooms_rounded;
+      case 'sports': return Icons.directions_run_rounded;
+      case 'beer': return Icons.local_bar_rounded;
+      case 'star': return Icons.star_rounded;
+      case 'favorite': return Icons.favorite_rounded;
+      case 'mood': return Icons.mood_rounded;
+      case 'water': return Icons.water_drop_rounded;
+      case 'food': return Icons.restaurant_rounded;
+      default: return Icons.category_rounded;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Theme.of(context).brightness == Brightness.light ? const Color(0xFFF0F2F8) : const Color(0xFF101012),
       appBar: AppBar(
-        title: Text(_titles[_selectedIndex], style: const TextStyle(fontWeight: FontWeight.bold)),
-        centerTitle: true,
+        title: Text(_titles[_selectedIndex], style: const TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.0)),
+        centerTitle: false,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: _selectedIndex == 0 ? [
+          IconButton(
+            icon: Icon(_isEditMode ? Icons.check_circle_rounded : Icons.edit_attributes_rounded, color: _isEditMode ? Colors.green : null),
+            onPressed: () => setState(() => _isEditMode = !_isEditMode),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline_rounded),
+            onPressed: () => _showAddOrEditTypeDialog(onSaved: () {}),
+          ),
+        ] : null,
       ),
       body: IndexedStack(
         index: _selectedIndex,
         children: [
-          _buildRecordJournalView(),
-          StatisticsScreen(
-            database: widget.database,
-            longPressSeconds: _longPressSeconds,
-          ),
+          _buildDashboardView(),
+          StatisticsScreen(database: widget.database, longPressSeconds: _longPressSeconds),
           _buildSettingsView(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          setState(() => _selectedIndex = index);
-        },
+        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.edit_calendar), label: "일지 기록"),
-          NavigationDestination(icon: Icon(Icons.legend_toggle), label: "분석 통계"),
-          NavigationDestination(icon: Icon(Icons.tune), label: "설정"),
+          NavigationDestination(icon: Icon(Icons.dashboard_rounded), label: "기록"),
+          NavigationDestination(icon: Icon(Icons.analytics_rounded), label: "통계"),
+          NavigationDestination(icon: Icon(Icons.settings_rounded), label: "설정"),
         ],
       ),
     );
   }
 
-  Widget _buildRecordJournalView() {
-    final startOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 0, 0, 0);
-    final endOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 23, 59, 59);
+  // ==========================================
+  // [1] 기록 대시보드 (날짜 제거, 프리셋 강화)
+  // ==========================================
+  Widget _buildDashboardView() {
+    final Size screenSize = MediaQuery.of(context).size;
+    final bool isTablet = screenSize.width > 600;
+    final int columns = isTablet ? 6 : 4;
 
     return StreamBuilder<List<CustomDataType>>(
       stream: widget.database.watchCustomDataTypes(),
-      builder: (context, typeSnapshot) {
-        if (!typeSnapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-        final types = typeSnapshot.data!;
-        final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
-        final otherTypes = types.where((t) => t.id != sleepType.id).toList();
-
-        return StreamBuilder<List<CustomDataRecord>>(
-          stream: widget.database.watchRecordsInPeriod(startOfDay, endOfDay),
-          builder: (context, recordSnapshot) {
-            final records = recordSnapshot.data ?? [];
-            final sleepRecords = records.where((r) => r.typeId == sleepType.id).toList();
-            final otherRecords = records.where((r) => r.typeId != sleepType.id).toList();
-
-            return ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final types = snapshot.data!;
+        
+        // 데이터가 전혀 없는 경우 프리셋 버튼 생성 제안
+        if (types.isEmpty) {
+          return Center(child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildDateNavigator(),
-                const SizedBox(height: 12),
-                _buildSleepSection(sleepType, sleepRecords),
-                const SizedBox(height: 20),
-                if (otherTypes.isNotEmpty) ...[
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text("일상 영향 요소 기록", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      TextButton.icon(
-                        onPressed: () => _showManageTypesDialog(),
-                        icon: const Icon(Icons.add_circle_outline, size: 16),
-                        label: const Text("유형 관리", style: TextStyle(fontSize: 12)),
-                      )
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _buildQuickLogGrid(otherTypes),
-                  const SizedBox(height: 24),
-                ],
-                if (records.isNotEmpty) ...[
-                  const Text("선택한 날의 기록 타임라인", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  _buildTimeline(records, types),
-                ] else ...[
-                  Card(
-                    elevation: 0,
-                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
-                    child: const Padding(
-                      padding: EdgeInsets.all(24.0),
-                      child: Center(
-                        child: Text("아직 기록된 항목이 없습니다.", style: TextStyle(color: Colors.grey, fontSize: 13)),
+                const Icon(Icons.auto_awesome_motion_rounded, size: 64, color: Colors.grey),
+                const SizedBox(height: 16),
+                const Text("대시보드 구성이 비어있습니다.", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    await widget.database.fixDataIntegrity(columns: columns);
+                    setState(() {});
+                  },
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text("기본 버튼 세트 생성 및 복구"),
+                )
+              ],
+            ),
+          ));
+        }
+
+        return LayoutBuilder(builder: (context, constraints) {
+          // 세로 방향으로 스크롤 없이 보이기 위해 타겟 행(Row) 설정
+          final double horizontalPadding = 48; // (24 * 2)
+          final double verticalPadding = 48;
+          
+          final double cellWidth = (constraints.maxWidth - horizontalPadding) / columns;
+          
+          // 한 화면에 약 6행이 딱 들어오도록 계산 (오버플로우 방지)
+          final double cellHeight = (constraints.maxHeight - verticalPadding) / 6;
+
+          return GestureDetector(
+            onTap: () {
+              if (_isEditMode) {
+                setState(() => _isEditMode = false);
+              }
+            },
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+              padding: const EdgeInsets.all(24),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  // 가이드라인이 부모 높이를 넘지 않도록 6행으로 제한
+                  if (_isEditMode) _buildGridGuide(constraints.maxWidth - horizontalPadding, cellHeight, 6, columns),
+                  
+                  // 드래그 중인 고스트(가이드) 표시
+                  if (_activeId != null) Positioned(
+                    left: _ghostX * cellWidth,
+                    top: _ghostY * cellHeight,
+                    width: _ghostW * cellWidth,
+                    height: _ghostH * cellHeight,
+                    child: Padding(
+                      padding: const EdgeInsets.all(4.0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.indigo.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.indigo.withOpacity(0.3), width: 2, strokeAlign: BorderSide.strokeAlignOutside),
+                        ),
                       ),
                     ),
                   ),
+
+                  ...types.map((type) => _buildPositionedWidget(type, cellWidth, cellHeight)),
                 ],
-                const SizedBox(height: 80),
-              ],
-            );
-          },
-        );
+              ),
+            ),
+          );
+        });
       },
     );
   }
 
-  Widget _buildDateNavigator() {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final isToday = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day).isAtSameMomentAs(today);
+  // 기본 프리셋 생성 (수면 1x1 버튼을 왼쪽 상단 0,0에 배치)
+  Future<void> _createDefaultPreset() async {
+    await widget.database.addCustomDataType(
+      name: '수면', iconName: 'hotel', colorValue: 0xFF4CAF50, isPreset: true,
+      x: 0, y: 0, w: 1, h: 1,
+    );
+  }
 
-    return Card(
-      elevation: 0,
-      color: Colors.indigo.withOpacity(0.06),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+  Widget _buildPositionedWidget(CustomDataType type, double cellW, double cellH) {
+    final bool isActive = _activeId == type.id;
+    final bool isMoving = isActive && !_isResizing;
+    final bool isResizing = isActive && _isResizing;
+    
+    return AnimatedPositioned(
+      duration: isActive ? Duration.zero : const Duration(milliseconds: 300),
+      curve: Curves.easeOutQuart,
+      // 이동 중일 때만 드래그 좌표 사용, 리사이즈 중에는 위치 고정
+      left: isMoving ? _dragX : type.gridX * cellW,
+      top: isMoving ? _dragY : type.gridY * cellH,
+      // 리사이즈 중에는 고스트 크기를 즉시 반영하여 실시간으로 변화하게 함
+      width: isResizing ? _ghostW * cellW : type.gridWidth * cellW,
+      height: isResizing ? _ghostH * cellH : type.gridHeight * cellH,
       child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        padding: const EdgeInsets.all(6.0),
+        child: _buildWidgetCard(type, cellW, cellH),
+      ),
+    );
+  }
+
+  Widget _buildWidgetCard(CustomDataType type, double cellW, double cellH) {
+    final bool isActive = _activeId == type.id;
+    final bool isMoving = isActive && !_isResizing;
+    final bool isResizing = isActive && _isResizing;
+
+    // 현재 상호작용 중인 크기 반영 (리사이즈 중이면 고스트 크기 사용)
+    final int currentW = isResizing ? _ghostW : type.gridWidth;
+    final int currentH = isResizing ? _ghostH : type.gridHeight;
+    final bool isSmall = currentW == 1 && currentH == 1;
+    
+    final Color color = Color(type.colorValue ?? Colors.indigo.value);
+    final int maxCol = MediaQuery.of(context).size.width > 600 ? 6 : 4;
+
+    final Color themeBgColor = Theme.of(context).scaffoldBackgroundColor;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanStart: _isEditMode ? (details) {
+        final double lx = details.localPosition.dx;
+        final double ly = details.localPosition.dy;
+        final double cardW = cellW * type.gridWidth;
+        final double cardH = cellH * type.gridHeight;
+        
+        print("🚩 [PAN START] ID: ${type.id}, Pos: (${lx.toStringAsFixed(1)}, ${ly.toStringAsFixed(1)}), CardSize: (${cardW.toStringAsFixed(1)}, ${cardH.toStringAsFixed(1)})");
+
+        // 리사이즈 핸들 영역(우측 하단 50x50으로 확대) 인지 확인
+        if (lx > cardW - 50 && ly > cardH - 50) {
+          print("📐 [RESIZE MODE START] ID: ${type.id}");
+          setState(() {
+            _activeId = type.id;
+            _isResizing = true;
+            _startGlobalX = details.globalPosition.dx;
+            _startGlobalY = details.globalPosition.dy;
+            _startGridW = type.gridWidth;
+            _startGridH = type.gridHeight;
+            _ghostX = type.gridX;
+            _ghostY = type.gridY;
+            _ghostW = type.gridWidth;
+            _ghostH = type.gridHeight;
+          });
+        } else {
+          print("🚚 [MOVE MODE START] ID: ${type.id}");
+          setState(() {
+            _activeId = type.id;
+            _isResizing = false;
+            _dragX = type.gridX * cellW;
+            _dragY = type.gridY * cellH;
+            _ghostX = type.gridX;
+            _ghostY = type.gridY;
+            _ghostW = type.gridWidth;
+            _ghostH = type.gridHeight;
+          });
+        }
+      } : null,
+      onPanUpdate: _isEditMode ? (details) {
+        if (_activeId != type.id) return;
+
+        if (_isResizing) {
+          // 리사이즈 로직
+          double deltaX = details.globalPosition.dx - _startGlobalX;
+          double deltaY = details.globalPosition.dy - _startGlobalY;
+          
+          int newW = (_startGridW + deltaX / cellW).round().clamp(1, maxCol - type.gridX);
+          int newH = (_startGridH + deltaY / cellH).round().clamp(1, 6); // 화면 내로 제한
+          
+          if (newW != _ghostW || newH != _ghostH) {
+            print("📐 [RESIZE UPDATE] $newW x $newH");
+            setState(() {
+              _ghostW = newW;
+              _ghostH = newH;
+            });
+          }
+        } else {
+          // 이동 로직
+          setState(() {
+            _dragX += details.delta.dx;
+            _dragY += details.delta.dy;
+            _ghostX = (_dragX / cellW).round().clamp(0, maxCol - type.gridWidth);
+            _ghostY = (_dragY / cellH).round().clamp(0, 6);
+          });
+        }
+      } : null,
+      onPanEnd: _isEditMode ? (details) async {
+        if (_activeId != type.id) return;
+
+        final int finalId = type.id;
+        final int finalX = _isResizing ? type.gridX : _ghostX;
+        final int finalY = _isResizing ? type.gridY : _ghostY;
+        final int finalW = _isResizing ? _ghostW : type.gridWidth;
+        final int finalH = _isResizing ? _ghostH : type.gridHeight;
+
+        print("🏁 [PAN END] ID: $finalId, Mode: ${_isResizing ? 'RESIZE' : 'MOVE'}, Result: ($finalX, $finalY) ${finalW}x$finalH");
+
+        setState(() {
+          _activeId = null;
+          _isResizing = false;
+        });
+
+        await widget.database.updateCustomDataTypeLayout(finalId, finalX, finalY, finalW, finalH);
+        await widget.database.fixDataIntegrity(columns: maxCol);
+      } : null,
+      onTap: _isEditMode ? null : () => _onWidgetTap(type),
+      onDoubleTap: _isEditMode ? null : () {
+        HapticFeedback.mediumImpact();
+        _showWidgetMenu(type);
+      },
+      onLongPress: _isEditMode ? null : () {
+        HapticFeedback.heavyImpact();
+        setState(() => _isEditMode = true);
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: color, // 배경색을 데이터 고유 색상으로 변경
+          borderRadius: BorderRadius.circular(isSmall ? 18 : 24),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(isActive ? 0.5 : 0.2), 
+              blurRadius: isActive ? 20 : 10, 
+              offset: isActive ? const Offset(0, 8) : const Offset(0, 4)
+            )
+          ],
+          // 편집 모드 시 테마에 따라 대비되는 테두리 표시
+          border: _isEditMode ? Border.all(color: themeBgColor.withOpacity(isActive ? 1.0 : 0.3), width: isActive ? 3 : 1.5) : null,
+        ),
+        child: Stack(
           children: [
-            IconButton(
-              icon: const Icon(Icons.chevron_left, color: Colors.indigo),
-              onPressed: () => setState(() => _selectedDate = _selectedDate.subtract(const Duration(days: 1))),
-            ),
-            InkWell(
-              onTap: () async {
-                final picked = await CustomPickerUtils.pickDate(context: context, initialDate: _selectedDate);
-                if (picked != null) setState(() => _selectedDate = picked);
-              },
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: Row(
-                  children: [
-                    const Icon(Icons.calendar_month, size: 18, color: Colors.indigo),
-                    const SizedBox(width: 8),
-                    Text(
-                      DateFormat('yyyy년 MM월 dd일 (E)', 'ko_KR').format(_selectedDate) + (isToday ? " [오늘]" : ""),
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.indigo),
-                    ),
-                  ],
+            // 아이콘과 텍스트를 현재 테마의 배경색(scaffoldBackgroundColor)으로 표시
+            _buildWidgetContent(type, currentW, currentH, themeBgColor),
+            if (_isEditMode) ...[
+              // 이동 핸들 아이콘 (중앙 상단)
+              Positioned(
+                top: 4, right: 0, left: 0,
+                child: Icon(Icons.drag_handle_rounded, size: 14, color: themeBgColor.withOpacity(0.5))
+              ),
+              // 삭제 버튼 (좌측 상단)
+              Positioned(
+                top: -2, left: -2,
+                child: IconButton(
+                  icon: Icon(Icons.remove_circle, size: 18, color: themeBgColor),
+                  onPressed: () => _confirmDeleteType(type, () {}),
                 ),
               ),
+              // 리사이즈 핸들 (우측 하단)
+              Positioned(
+                bottom: 0, right: 0,
+                child: Container(
+                  width: 50, height: 50,
+                  alignment: Alignment.bottomRight,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isResizing ? Colors.red.withOpacity(0.2) : themeBgColor.withOpacity(0.1),
+                    borderRadius: const BorderRadius.only(bottomRight: Radius.circular(18)),
+                  ),
+                  child: Icon(
+                    Icons.south_east_rounded, 
+                    size: 24, 
+                    color: isResizing ? Colors.redAccent : themeBgColor,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWidgetContent(CustomDataType type, int w, int h, Color foregroundColor) {
+    final bool isHorizontal = w > h;
+    final IconData iconData = _getIconData(type.iconName);
+
+    if (isHorizontal) {
+      // [가로형 레이아웃] 아이콘 좌측, 텍스트 우측
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+        child: Row(
+          children: [
+            // 아이콘 영역 (정사각 유지)
+            AspectRatio(
+              aspectRatio: 1,
+              child: LayoutBuilder(builder: (context, constraints) {
+                return Icon(iconData, color: foregroundColor, size: constraints.maxHeight * 0.5);
+              }),
             ),
-            IconButton(
-              icon: const Icon(Icons.chevron_right, color: Colors.indigo),
-              onPressed: isToday ? null : () => setState(() => _selectedDate = _selectedDate.add(const Duration(days: 1))),
+            const SizedBox(width: 8),
+            // 텍스트 영역
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(type.name,
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.5,
+                            color: foregroundColor)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // [세로형/정사각 레이아웃] 아이콘 중앙, 텍스트 하단
+      return LayoutBuilder(builder: (context, constraints) {
+        final double minSide = constraints.maxWidth < constraints.maxHeight
+            ? constraints.maxWidth
+            : constraints.maxHeight;
+        final bool isSmall = w == 1 && h == 1;
+
+        return Container(
+          padding: const EdgeInsets.all(8.0),
+          child: Column(
+            children: [
+              // 아이콘 (상단/중앙)
+              Expanded(
+                flex: 5,
+                child: Center(
+                  child: Icon(iconData,
+                      color: foregroundColor, size: minSide * (isSmall ? 0.45 : 0.55)),
+                ),
+              ),
+              // 텍스트 (하단 고정)
+              Expanded(
+                flex: 2,
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.topCenter,
+                    child: Text(type.name,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                          color: foregroundColor,
+                        )),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      });
+    }
+  }
+
+  Widget _buildGridGuide(double width, double cellH, int rows, int columns) {
+    return Column(children: List.generate(rows, (y) => Row(children: List.generate(columns, (x) => Container(
+      width: width / columns, height: cellH,
+      decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.05))),
+    )))));
+  }
+
+  // ==========================================
+  // [2] 설정 탭 뷰
+  // ==========================================
+  Widget _buildSettingsView() {
+    return ListView(children: [
+      const Padding(padding: EdgeInsets.all(16.0), child: Text("환경 설정", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+      RadioListTile<ThemeMode>(title: const Text("시스템 설정"), value: ThemeMode.system, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
+      RadioListTile<ThemeMode>(title: const Text("라이트 모드"), value: ThemeMode.light, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
+      RadioListTile<ThemeMode>(title: const Text("다크 모드"), value: ThemeMode.dark, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
+      const Divider(),
+      ListTile(title: const Text("데이터 삭제를 위한 길게 누르기 시간"), subtitle: Text("통계 지표 꾹 누르기 시간: ${_longPressSeconds.toStringAsFixed(1)}초"), leading: const Icon(Icons.timer_rounded)),
+      Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Slider(value: _longPressSeconds, min: 1.0, max: 10.0, divisions: 18, onChanged: (value) => _saveLongPressSeconds(value))),
+      const Divider(),
+      ListTile(title: const Text("모든 데이터 초기화"), subtitle: const Text("영구 파괴 및 대시보드 리셋"), leading: const Icon(Icons.delete_forever_rounded, color: Colors.redAccent), onTap: () => _confirmResetAllData()),
+    ]);
+  }
+
+  // ==========================================
+  // [3] 비즈니스 로직
+  // ==========================================
+  void _onWidgetTap(CustomDataType type) {
+    HapticFeedback.mediumImpact(); // 햅틱 반응 추가
+    if (type.name == '수면') {
+      _showSleepLogDialog(type.id);
+    } else {
+      _quickLogEvent(type);
+    }
+  }
+
+  Future<void> _quickLogEvent(CustomDataType type) async {
+    final now = DateTime.now();
+    await widget.database.addCustomDataRecord(typeId: type.id, timestamp: now);
+    _showToast(type, "${type.name} 기록 완료");
+  }
+
+  void _showToast(CustomDataType type, String message) {
+    if (!mounted) return;
+    final color = Color(type.colorValue ?? Colors.indigo.value);
+    final onColor = Theme.of(context).scaffoldBackgroundColor;
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(_getIconData(type.iconName), color: onColor, size: 20),
+            const SizedBox(width: 12),
+            Text(
+              message,
+              style: TextStyle(color: onColor, fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+          ],
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        duration: const Duration(seconds: 2),
+        elevation: 4,
+      ),
+    );
+  }
+
+  void _showLayoutEditDialog(CustomDataType type) {
+    int x = type.gridX; int y = type.gridY; int w = type.gridWidth; int h = type.gridHeight;
+    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(
+      title: Text("${type.name} 위젯 설정"),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text("위치 (X, Y 좌표)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          _counterField("X", x, (v) => setDlgState(() => x = v.clamp(0, 3))),
+          _counterField("Y", y, (v) => setDlgState(() => y = v.clamp(0, 20))),
+        ]),
+        const SizedBox(height: 16),
+        const Text("크기 (가로, 세로 칸 수)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          _counterField("가로", w, (v) => setDlgState(() => w = v.clamp(1, 4))),
+          _counterField("세로", h, (v) => setDlgState(() => h = v.clamp(1, 4))),
+        ]),
+      ]),
+      actions: [
+        TextButton(onPressed: () => _confirmDeleteType(type, () => Navigator.pop(ctx)), child: const Text("삭제", style: TextStyle(color: Colors.red))),
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+        FilledButton(onPressed: () async {
+          await widget.database.updateCustomDataTypeLayout(type.id, x, y, w, h);
+          if (ctx.mounted) Navigator.pop(ctx);
+        }, child: const Text("저장")),
+      ],
+    )));
+  }
+
+  Future<void> _showPastRecordDialog(CustomDataType type) async {
+    final d = await CustomPickerUtils.pickDate(context: context, initialDate: DateTime.now());
+    if (d == null) return;
+    final t = await CustomPickerUtils.pickTime(context: context, initialTime: TimeOfDay.now());
+    if (t == null) return;
+    
+    final finalTime = DateTime(d.year, d.month, d.day, t.hour, t.minute);
+    
+    if (mounted) {
+      final memoController = TextEditingController();
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text("${type.name} 과거 기록 추가"),
+          content: TextField(
+            controller: memoController,
+            maxLines: 5,
+            minLines: 3,
+            decoration: const InputDecoration(
+              labelText: "세부 내용 (선택)",
+              hintText: "예:\n- 졸피뎀 10mg\n- 마그네슘 200mg\n- 아메리카노",
+              alignLabelWithHint: true,
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+            FilledButton(
+              onPressed: () async {
+                await widget.database.addCustomDataRecord(
+                  typeId: type.id,
+                  timestamp: finalTime,
+                  value: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
+                );
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  _showToast(type, "${type.name} 과거 기록 추가됨");
+                }
+              },
+              child: const Text("저장"),
+            )
+          ],
+        ),
+      );
+    }
+  }
+
+  void _showWidgetMenu(CustomDataType type) {
+    final color = Color(type.colorValue ?? Colors.indigo.value);
+    final onColor = Theme.of(context).scaffoldBackgroundColor;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: color,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        contentPadding: const EdgeInsets.symmetric(vertical: 16),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (type.name != '수면') ...[
+              _menuOption(
+                ctx,
+                icon: Icons.add_circle_outline_rounded,
+                label: "지금 기록 추가",
+                onColor: onColor,
+                onTap: () => _quickLogEvent(type),
+              ),
+              const Divider(color: Colors.white24, indent: 16, endIndent: 16),
+            ],
+            _menuOption(
+              ctx,
+              icon: Icons.history_rounded,
+              label: "지난 기록 추가",
+              onColor: onColor,
+              onTap: () {
+                if (type.name == '수면') {
+                  _showSleepLogDialog(type.id);
+                } else {
+                  _showPastRecordDialog(type);
+                }
+              },
+            ),
+            const Divider(color: Colors.white24, indent: 16, endIndent: 16),
+            _menuOption(
+              ctx,
+              icon: Icons.note_add_rounded,
+              label: "메모 추가",
+              onColor: onColor,
+              onTap: () => _showMemoDialog(type),
+            ),
+            const Divider(color: Colors.white24, indent: 16, endIndent: 16),
+            _menuOption(
+              ctx,
+              icon: Icons.settings_suggest_rounded,
+              label: "기록 수정",
+              onColor: onColor,
+              onTap: () => _showAddOrEditTypeDialog(type: type, onSaved: () {}),
             ),
           ],
         ),
@@ -214,253 +702,169 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildSleepSection(CustomDataType sleepType, List<CustomDataRecord> sleepRecords) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text("수면 세션 기록", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            FilledButton.icon(
-              onPressed: () => _showSleepLogDialog(sleepType.id),
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text("수면 기록 추가", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-              style: FilledButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (sleepRecords.isEmpty)
-          Card(
-            elevation: 0,
-            color: Colors.green.withOpacity(0.05),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.green.withOpacity(0.15))),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-              child: Center(child: Text("기록된 수면이 없습니다. 수면 일지를 추가해 주세요.", style: TextStyle(color: Colors.grey, fontSize: 13))),
-            ),
-          )
-        else
-          Column(
-            children: sleepRecords.map((record) {
-              int? endUnix;
-              int quality = 3;
-              String memo = "";
-              if (record.value != null) {
-                try {
-                  final data = json.decode(record.value!);
-                  endUnix = data['endUnix'] as int?;
-                  quality = data['quality'] as int? ?? 3;
-                  memo = data['memo'] as String? ?? "";
-                } catch (_) { endUnix = int.tryParse(record.value!); }
-              }
-              final startDT = DateTime.fromMillisecondsSinceEpoch(record.unixTimestamp * 1000);
-              final endDT = endUnix != null ? DateTime.fromMillisecondsSinceEpoch(endUnix * 1000) : null;
-              final durationMin = endDT != null ? endDT.difference(startDT).inMinutes : null;
-
-              return Card(
-                elevation: 1,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.green.withOpacity(0.2))),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.hotel, color: Colors.green, size: 24)),
-                      const SizedBox(width: 14),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Row(children: [
-                          Text(DateFormat('HH:mm').format(startDT), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          const Text(" ~ ", style: TextStyle(color: Colors.grey, fontSize: 15)),
-                          Text(endDT != null ? DateFormat('HH:mm').format(endDT) : "진행중", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          if (durationMin != null) ...[const SizedBox(width: 8), Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: Colors.green.withOpacity(0.08), borderRadius: BorderRadius.circular(6)), child: Text("${durationMin ~/ 60}시간 ${durationMin % 60}분", style: const TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.bold)))]
-                        ]),
-                        const SizedBox(height: 6),
-                        Row(children: List.generate(5, (index) => Icon(index < quality ? Icons.star : Icons.star_border, color: Colors.amber, size: 16))),
-                        if (memo.isNotEmpty) ...[const SizedBox(height: 6), Text(memo, style: const TextStyle(fontSize: 13, color: Colors.grey, fontStyle: FontStyle.italic))]
-                      ])),
-                      IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent), onPressed: () => _confirmDeleteRecord(record.id, "수면 기록")),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildQuickLogGrid(List<CustomDataType> otherTypes) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: otherTypes.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 10, mainAxisSpacing: 10, mainAxisExtent: 64),
-      itemBuilder: (context, index) {
-        final type = otherTypes[index];
-        final typeColor = Color(type.colorValue ?? Colors.indigo.value);
-        return Card(
-          elevation: 0.5,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: typeColor.withOpacity(0.15))),
-          child: InkWell(
-            onTap: () => _quickLogEvent(type),
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10.0), child: Row(children: [
-              Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: typeColor.withOpacity(0.08), shape: BoxShape.circle), child: Icon(_getIconData(type.iconName), color: typeColor, size: 20)),
-              const SizedBox(width: 8),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-                Text(type.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-                const Text("탭하여 빠른기록", style: TextStyle(fontSize: 10, color: Colors.grey))
-              ])),
-              IconButton(icon: const Icon(Icons.edit_note, size: 18), color: typeColor, constraints: const BoxConstraints(), padding: EdgeInsets.zero, onPressed: () => _showDetailLogSheet(type)),
-            ])),
-          ),
-        );
+  Widget _menuOption(BuildContext dialogCtx,
+      {required IconData icon, required String label, required Color onColor, required VoidCallback onTap}) {
+    return ListTile(
+      leading: Icon(icon, color: onColor),
+      title: Text(label, style: TextStyle(color: onColor, fontWeight: FontWeight.bold, fontSize: 16)),
+      onTap: () {
+        Navigator.pop(dialogCtx);
+        onTap();
       },
     );
   }
 
-  Widget _buildTimeline(List<CustomDataRecord> records, List<CustomDataType> types) {
-    final sortedRecords = List<CustomDataRecord>.from(records)..sort((a, b) => b.unixTimestamp.compareTo(a.unixTimestamp));
-    return Column(children: sortedRecords.map((record) {
-      final type = types.firstWhere((t) => t.id == record.typeId, orElse: () => types[0]);
-      final typeColor = Color(type.colorValue ?? Colors.indigo.value);
-      final dt = DateTime.fromMillisecondsSinceEpoch(record.unixTimestamp * 1000);
-      final timeStr = DateFormat('HH:mm').format(dt);
-      String title = type.name;
-      String subtitle = "";
-      if (type.name == '수면' && record.value != null) {
-        try {
-          final data = json.decode(record.value!);
-          final endUnix = data['endUnix'] as int?;
-          final startDT = DateTime.fromMillisecondsSinceEpoch(record.unixTimestamp * 1000);
-          final endDT = endUnix != null ? DateTime.fromMillisecondsSinceEpoch(endUnix * 1000) : null;
-          if (endDT != null) subtitle = "${endDT.difference(startDT).inHours}시간 ${endDT.difference(startDT).inMinutes % 60}분 수면 (${data['quality']}★)";
-        } catch (_) { subtitle = "수면기록"; }
-      } else if (record.value != null && record.value!.trim().isNotEmpty) { subtitle = record.value!; }
-      return Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.1))),
-        child: ListTile(
-          dense: true,
-          leading: CircleAvatar(backgroundColor: typeColor.withOpacity(0.1), radius: 16, child: Icon(_getIconData(type.iconName), color: typeColor, size: 16)),
-          title: Row(children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)), const Spacer(), Text(timeStr, style: const TextStyle(color: Colors.grey, fontSize: 12))]),
-          subtitle: subtitle.isNotEmpty ? Padding(padding: const EdgeInsets.only(top: 2.0), child: Text(subtitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12))) : null,
-          trailing: IconButton(icon: const Icon(Icons.close, size: 16, color: Colors.grey), onPressed: () => _confirmDeleteRecord(record.id, type.name)),
-        ),
-      );
-    }).toList());
-  }
-
-  Widget _buildSettingsView() {
-    return ListView(children: [
-      const Padding(padding: EdgeInsets.all(16.0), child: Text("테마 및 사용자 환경", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-      RadioListTile<ThemeMode>(title: const Text("시스템 설정"), value: ThemeMode.system, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
-      RadioListTile<ThemeMode>(title: const Text("라이트 모드"), value: ThemeMode.light, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
-      RadioListTile<ThemeMode>(title: const Text("다크 모드"), value: ThemeMode.dark, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
-      const Divider(),
-      ListTile(title: const Text("데이터 삭제를 위한 길게 누르기 시간"), subtitle: Text("차트 지표 꾹 누르기 시간: ${_longPressSeconds.toStringAsFixed(1)}초"), leading: const Icon(Icons.timer)),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Slider(value: _longPressSeconds, min: 1.0, max: 10.0, divisions: 18, onChanged: (value) => _saveLongPressSeconds(value))),
-      const Divider(),
-      const Padding(padding: EdgeInsets.all(16.0), child: Text("데이터베이스 관리", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-      ListTile(title: const Text("기록 유형 커스텀 관리"), subtitle: const Text("수면에 방해/영향을 주는 항목 및 복용 약물을 직접 커스텀해보세요."), leading: const Icon(Icons.dashboard_customize, color: Colors.indigo), onTap: () => _showManageTypesDialog()),
-      ListTile(title: const Text("모든 데이터 초기화"), subtitle: const Text("모든 커스텀 설정 및 기록 데이터를 영구히 파괴합니다."), leading: const Icon(Icons.delete_forever, color: Colors.redAccent), onTap: () => _confirmResetAllData()),
-    ]);
-  }
-
-  Future<void> _quickLogEvent(CustomDataType type) async {
-    final now = DateTime.now();
-    final logTime = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, now.hour, now.minute, now.second);
-    final recordId = await widget.database.addCustomDataRecord(typeId: type.id, timestamp: logTime);
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${type.name} 기록되었습니다. (${DateFormat('HH:mm').format(logTime)})"), action: SnackBarAction(label: "실행 취소", onPressed: () => widget.database.deleteCustomDataRecord(recordId))));
-    }
-  }
-
-  void _showDetailLogSheet(CustomDataType type) async {
-    final recentValues = await widget.database.getRecentRecordValues(type.id);
-    final textController = TextEditingController();
-    TimeOfDay selectedTime = TimeOfDay.now();
-    if (mounted) {
-      showModalBottomSheet(context: context, isScrollControlled: true, builder: (context) => StatefulBuilder(builder: (context, setSheetState) => Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 24, left: 20, right: 20, top: 20), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Icon(_getIconData(type.iconName), color: Color(type.colorValue ?? Colors.indigo.value)), const SizedBox(width: 8), Text("${type.name} 상세 입력", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]),
-        const SizedBox(height: 16),
-        Row(children: [const Text("기록 시각: ", style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(width: 8), OutlinedButton.icon(onPressed: () async { final time = await CustomPickerUtils.pickTime(context: context, initialTime: selectedTime); if (time != null) setSheetState(() => selectedTime = time); }, icon: const Icon(Icons.access_time, size: 16), label: Text(selectedTime.format(context)))]),
-        const SizedBox(height: 16),
-        TextField(controller: textController, decoration: InputDecoration(labelText: "추가 정보 / 약 이름 및 용량", hintText: "예: 졸피뎀 10mg, 아메리카노 1잔 등", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
-        if (recentValues.isNotEmpty) ...[const SizedBox(height: 12), const Text("최근 기입 목록 (탭하여 바로 입력)", style: TextStyle(fontSize: 12, color: Colors.grey)), const SizedBox(height: 6), Wrap(spacing: 6, runSpacing: 4, children: recentValues.map((val) => InkWell(onTap: () => textController.text = val, child: Chip(label: Text(val, style: const TextStyle(fontSize: 11)), padding: EdgeInsets.zero, visualDensity: VisualDensity.compact))).toList())],
-        const SizedBox(height: 20),
-        Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("취소")), const SizedBox(width: 8), FilledButton(onPressed: () async { final logTime = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, selectedTime.hour, selectedTime.minute); await widget.database.addCustomDataRecord(typeId: type.id, timestamp: logTime, value: textController.text.trim().isEmpty ? null : textController.text.trim()); if (context.mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${type.name} 상세 입력 완료"))); } }, child: const Text("저장"))])
-      ]))));
-    }
-  }
-
-  void _showSleepLogDialog(int sleepTypeId) {
-    DateTime startDT = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 22, 0);
-    DateTime endDT = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 7, 0).add(const Duration(days: 1));
-    int selectedQuality = 3;
+  void _showMemoDialog(CustomDataType type) {
     final memoController = TextEditingController();
-    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(
-      title: const Row(children: [Icon(Icons.bedtime, color: Colors.green), SizedBox(width: 8), Text("수면 기록 추가", style: TextStyle(fontWeight: FontWeight.bold))]),
-      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text("취침 시각", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.indigo)),
-        Row(children: [Expanded(child: OutlinedButton(onPressed: () async { final d = await CustomPickerUtils.pickDate(context: context, initialDate: startDT); if (d != null) setDlgState(() { startDT = DateTime(d.year, d.month, d.day, startDT.hour, startDT.minute); if (endDT.isBefore(startDT)) endDT = startDT.add(const Duration(hours: 8)); }); }, child: Text(DateFormat('MM월 dd일').format(startDT)))), const SizedBox(width: 8), Expanded(child: OutlinedButton(onPressed: () async { final t = await CustomPickerUtils.pickTime(context: context, initialTime: TimeOfDay.fromDateTime(startDT)); if (t != null) setDlgState(() { startDT = DateTime(startDT.year, startDT.month, startDT.day, t.hour, t.minute); if (endDT.isBefore(startDT)) endDT = startDT.add(const Duration(hours: 8)); }); }, child: Text(DateFormat('HH:mm').format(startDT))))]),
-        const SizedBox(height: 12),
-        const Text("기상 시각", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.indigo)),
-        Row(children: [Expanded(child: OutlinedButton(onPressed: () async { final d = await CustomPickerUtils.pickDate(context: context, initialDate: endDT); if (d != null) setDlgState(() { endDT = DateTime(d.year, d.month, d.day, endDT.hour, endDT.minute); if (endDT.isBefore(startDT)) startDT = endDT.subtract(const Duration(hours: 8)); }); }, child: Text(DateFormat('MM월 dd일').format(endDT)))), const SizedBox(width: 8), Expanded(child: OutlinedButton(onPressed: () async { final t = await CustomPickerUtils.pickTime(context: context, initialTime: TimeOfDay.fromDateTime(endDT)); if (t != null) setDlgState(() { endDT = DateTime(endDT.year, endDT.month, endDT.day, t.hour, t.minute); if (endDT.isBefore(startDT)) startDT = endDT.subtract(const Duration(hours: 8)); }); }, child: Text(DateFormat('HH:mm').format(endDT))))]),
-        const SizedBox(height: 8),
-        Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), decoration: BoxDecoration(color: Colors.green.withOpacity(0.08), borderRadius: BorderRadius.circular(8)), child: Text("총 수면 시간: ${endDT.difference(startDT).inHours}시간 ${endDT.difference(startDT).inMinutes % 60}분", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)))),
-        const SizedBox(height: 16),
-        const Text("수면 만족도", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (index) => IconButton(icon: Icon(index < selectedQuality ? Icons.star : Icons.star_border, color: Colors.amber, size: 28), onPressed: () => setDlgState(() => selectedQuality = index + 1)))),
-        const SizedBox(height: 12),
-        TextField(controller: memoController, decoration: InputDecoration(labelText: "수면 만족도 사유 및 메모", hintText: "예: 꿈을 많이 꿨다, 새벽에 깼음", border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)))),
-      ])),
-      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")), FilledButton(onPressed: () async { final valueJson = json.encode({'endUnix': endDT.millisecondsSinceEpoch ~/ 1000, 'quality': selectedQuality, 'memo': memoController.text.trim()}); await widget.database.addCustomDataRecord(typeId: sleepTypeId, timestamp: startDT, value: valueJson); if (ctx.mounted) Navigator.pop(ctx); }, child: const Text("기록"))]
-    )));
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("${type.name} 메모 기록"),
+        content: TextField(
+          controller: memoController,
+          autofocus: true,
+          maxLines: 5,
+          minLines: 3,
+          decoration: const InputDecoration(
+            labelText: "메모 입력",
+            hintText: "예:\n- 타이레놀 1알\n- 비타민C 1000mg",
+            alignLabelWithHint: true,
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+          FilledButton(
+            onPressed: () async {
+              await widget.database.addCustomDataRecord(
+                typeId: type.id,
+                timestamp: DateTime.now(),
+                value: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
+              );
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+                _showToast(type, "${type.name} 기록됨");
+              }
+            },
+            child: const Text("기록"),
+          ),
+        ],
+      ),
+    );
   }
 
-  void _confirmDeleteRecord(int recordId, String typeName) {
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: Text("$typeName 삭제"), content: const Text("정말로 이 기록을 삭제하시겠습니까?"), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")), TextButton(onPressed: () async { await widget.database.deleteCustomDataRecord(recordId); if (ctx.mounted) Navigator.pop(ctx); }, child: const Text("삭제", style: TextStyle(color: Colors.red)))]));
-  }
-
-  void _showManageTypesDialog() {
-    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(title: const Row(children: [Icon(Icons.dashboard_customize, color: Colors.indigo), SizedBox(width: 8), Text("기록 유형 관리", style: TextStyle(fontWeight: FontWeight.bold))]), content: SizedBox(width: double.maxFinite, height: 380, child: FutureBuilder<List<CustomDataType>>(future: widget.database.getCustomDataTypes(), builder: (context, snapshot) { if (!snapshot.hasData) return const Center(child: CircularProgressIndicator()); final types = snapshot.data!; return Column(children: [Expanded(child: ListView.builder(itemCount: types.length, itemBuilder: (context, index) { final type = types[index]; final typeColor = Color(type.colorValue ?? Colors.indigo.value); return ListTile(dense: true, leading: Icon(_getIconData(type.iconName), color: typeColor), title: Text(type.name, style: const TextStyle(fontWeight: FontWeight.bold)), subtitle: Text(type.isPreset ? "기본 프리셋 (수정불가)" : "커스텀 유형", style: const TextStyle(fontSize: 10)), trailing: type.isPreset ? null : Row(mainAxisSize: MainAxisSize.min, children: [IconButton(icon: const Icon(Icons.edit, size: 16, color: Colors.grey), onPressed: () => _showAddOrEditTypeDialog(type: type, onSaved: () => setDlgState(() {}))), IconButton(icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent), onPressed: () => _confirmDeleteType(type, () => setDlgState(() {})))])); })), const Divider(), FilledButton.icon(onPressed: () => _showAddOrEditTypeDialog(onSaved: () => setDlgState(() {})), icon: const Icon(Icons.add), label: const Text("새 기록 유형 만들기"))]); })), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("닫기"))])));
-  }
+  Widget _counterField(String label, int val, Function(int) onChg) => Column(children: [
+    Text(label, style: const TextStyle(fontSize: 10)),
+    Row(children: [
+      IconButton(icon: const Icon(Icons.remove_circle_outline, size: 20), onPressed: () => onChg(val - 1)),
+      Text("$val", style: const TextStyle(fontWeight: FontWeight.bold)),
+      IconButton(icon: const Icon(Icons.add_circle_outline, size: 20), onPressed: () => onChg(val + 1)),
+    ])
+  ]);
 
   void _showAddOrEditTypeDialog({CustomDataType? type, required VoidCallback onSaved}) {
+    final isEdit = type != null;
     final nameController = TextEditingController(text: type?.name ?? "");
     String selectedIcon = type?.iconName ?? "medication";
     int selectedColor = type?.colorValue ?? 0xFF3F51B5;
-    final List<Map<String, dynamic>> icons = [{'name': 'medication', 'icon': Icons.medication, 'label': '약물'}, {'name': 'coffee', 'icon': Icons.local_cafe, 'label': '카페인'}, {'name': 'smoke', 'icon': Icons.smoking_rooms, 'label': '담배'}, {'name': 'sports', 'icon': Icons.directions_run, 'label': '운동'}, {'name': 'beer', 'icon': Icons.local_bar, 'label': '술'}, {'name': 'star', 'icon': Icons.star, 'label': '스타'}, {'name': 'favorite', 'icon': Icons.favorite, 'label': '사랑'}, {'name': 'mood', 'icon': Icons.mood, 'label': '감정'}];
+    
+    final List<Map<String, dynamic>> icons = [{'name': 'medication', 'icon': Icons.medication_rounded}, {'name': 'coffee', 'icon': Icons.local_cafe_rounded}, {'name': 'smoke', 'icon': Icons.smoking_rooms_rounded}, {'name': 'sports', 'icon': Icons.directions_run_rounded}, {'name': 'beer', 'icon': Icons.local_bar_rounded}, {'name': 'star', 'icon': Icons.star_rounded}, {'name': 'favorite', 'icon': Icons.favorite_rounded}, {'name': 'mood', 'icon': Icons.mood_rounded}, {'name': 'water', 'icon': Icons.water_drop_rounded}, {'name': 'food', 'icon': Icons.restaurant_rounded}];
     final List<int> colors = [0xFF3F51B5, 0xFF4CAF50, 0xFFFF9800, 0xFFE91E63, 0xFF009688, 0xFF9C27B0, 0xFF2196F3, 0xFF795548];
-    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(title: Text(type == null ? "새 유형 만들기" : "기록 유형 편집", style: const TextStyle(fontWeight: FontWeight.bold)), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      TextField(controller: nameController, decoration: const InputDecoration(labelText: "유형 이름 (예: 커피, 졸피뎀 5mg)", border: OutlineInputBorder())),
-      const SizedBox(height: 16),
-      const Text("대표 아이콘 선택", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-      const SizedBox(height: 8),
-      Wrap(spacing: 8, runSpacing: 8, children: icons.map((item) { final bool isSelected = selectedIcon == item['name']; return ChoiceChip(avatar: Icon(item['icon'], size: 16, color: isSelected ? Colors.white : Colors.indigo), label: Text(item['label']), selected: isSelected, selectedColor: Colors.indigo, labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.black), onSelected: (selected) { if (selected) setDlgState(() => selectedIcon = item['name'] as String); }); }).toList()),
-      const SizedBox(height: 16),
-      const Text("대표 컬러 선택", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-      const SizedBox(height: 8),
-      Wrap(spacing: 12, children: colors.map<Widget>((colorVal) { final bool isSelected = selectedColor == colorVal; return GestureDetector(onTap: () => setDlgState(() => selectedColor = colorVal), child: CircleAvatar(backgroundColor: Color(colorVal), radius: 14, child: isSelected ? const Icon(Icons.check, size: 14, color: Colors.white) : null)); }).toList()),
-    ])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")), FilledButton(onPressed: () async { final name = nameController.text.trim(); if (name.isEmpty) return; if (type == null) { await widget.database.addCustomDataType(name: name, iconName: selectedIcon, colorValue: selectedColor); } else { await widget.database.updateCustomDataType(type.id, name, selectedIcon, selectedColor); } onSaved(); if (ctx.mounted) Navigator.pop(ctx); }, child: const Text("저장"))])));
+    
+    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(
+      title: Text(isEdit ? "기록 버튼 수정" : "새 기록 버튼 추가"),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: nameController, decoration: const InputDecoration(labelText: "이름", border: OutlineInputBorder())),
+        const SizedBox(height: 16),
+        const Text("아이콘 선택", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: icons.map((i) => ChoiceChip(avatar: Icon(i['icon'], size: 16), label: const Text(""), selected: selectedIcon == i['name'], onSelected: (s) => setDlgState(() => selectedIcon = i['name']))).toList()),
+        const SizedBox(height: 16),
+        const Text("테마 색상", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 12, runSpacing: 12, children: colors.map((c) => GestureDetector(onTap: () => setDlgState(() => selectedColor = c), child: CircleAvatar(backgroundColor: Color(c), radius: 14, child: selectedColor == c ? const Icon(Icons.check, size: 14, color: Colors.white) : null))).toList()),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+        FilledButton(onPressed: () async {
+          if (nameController.text.isEmpty) return;
+          if (isEdit) {
+            await widget.database.updateCustomDataTypeInfo(type.id, nameController.text, selectedIcon, selectedColor);
+          } else {
+            await widget.database.addCustomDataType(name: nameController.text, iconName: selectedIcon, colorValue: selectedColor, x: 0, y: 0, w: 1, h: 1);
+            await widget.database.fixDataIntegrity(columns: MediaQuery.of(context).size.width > 600 ? 6 : 4);
+          }
+          onSaved();
+          if (ctx.mounted) Navigator.pop(ctx);
+        }, child: Text(isEdit ? "수정 완료" : "생성")),
+      ],
+    )));
+  }
+
+  void _showSleepLogDialog(int sleepTypeId) {
+    final now = DateTime.now();
+    DateTime startDT = DateTime(now.year, now.month, now.day, 22, 0);
+    DateTime endDT = DateTime(now.year, now.month, now.day, 7, 0).add(const Duration(days: 1));
+    int quality = 3;
+    final memoController = TextEditingController();
+
+    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(
+      title: const Text("수면 기록"),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        OutlinedButton(onPressed: () async { final d = await CustomPickerUtils.pickDate(context: context, initialDate: startDT); if (d != null) setDlgState(() => startDT = DateTime(d.year, d.month, d.day, startDT.hour, startDT.minute)); }, child: Text("취침: ${DateFormat('MM/dd HH:mm').format(startDT)}")),
+        OutlinedButton(onPressed: () async { final d = await CustomPickerUtils.pickDate(context: context, initialDate: endDT); if (d != null) setDlgState(() => endDT = DateTime(d.year, d.month, d.day, endDT.hour, endDT.minute)); }, child: Text("기상: ${DateFormat('MM/dd HH:mm').format(endDT)}")),
+        const SizedBox(height: 16),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (i) => IconButton(icon: Icon(i < quality ? Icons.star : Icons.star_border, color: Colors.amber), onPressed: () => setDlgState(() => quality = i + 1)))),
+        TextField(controller: memoController, decoration: const InputDecoration(labelText: "메모")),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+        FilledButton(onPressed: () async {
+          final val = jsonEncode({'endUnix': endDT.millisecondsSinceEpoch ~/ 1000, 'quality': quality, 'memo': memoController.text});
+          await widget.database.addCustomDataRecord(typeId: sleepTypeId, timestamp: startDT, value: val);
+          if (ctx.mounted) {
+            Navigator.pop(ctx);
+            // 수면 타입 정보를 가져와서 토스트 표시
+            final types = await widget.database.getCustomDataTypes();
+            final sleepType = types.firstWhere((t) => t.id == sleepTypeId);
+            _showToast(sleepType, "수면 기록 저장됨");
+          }
+        }, child: const Text("저장")),
+      ],
+    )));
   }
 
   void _confirmDeleteType(CustomDataType type, VoidCallback onDeleteDone) {
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: Text("${type.name} 유형 삭제"), content: Text("정말로 이 기록 유형을 삭제하시겠습니까?\n\n※ 주의: 이 유형에 속한 모든 기존 기록 데이터(${type.name})도 영구적으로 파괴됩니다."), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")), TextButton(onPressed: () async { await widget.database.deleteCustomDataType(type.id); onDeleteDone(); if (ctx.mounted) Navigator.pop(ctx); }, child: const Text("전체 삭제", style: TextStyle(color: Colors.red)))]));
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text("버튼 삭제"),
+      content: const Text("이 버튼과 관련된 모든 기록이 삭제됩니다. 계속하시겠습니까?"),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+        TextButton(onPressed: () async {
+          await widget.database.deleteCustomDataType(type.id);
+          onDeleteDone();
+          if (ctx.mounted) Navigator.pop(ctx);
+        }, child: const Text("삭제", style: TextStyle(color: Colors.red))),
+      ],
+    ));
   }
 
   void _confirmResetAllData() {
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("데이터 영구 초기화"), content: const Text("정말로 모든 커스텀 유형 설정 및 수면 기록을 영구 파괴하시겠습니까? 이 작업은 절대 취소할 수 없습니다."), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")), TextButton(onPressed: () async {
-      await widget.database.transaction(() async {
-        await widget.database.delete(widget.database.customDataRecords).go();
-        await widget.database.delete(widget.database.customDataTypes).go();
-        await widget.database.into(widget.database.customDataTypes).insert(CustomDataTypesCompanion.insert(name: '수면', iconName: const Value('hotel'), colorValue: const Value(0xFF4CAF50), isPreset: const Value(true)));
-        await widget.database.into(widget.database.customDataTypes).insert(CustomDataTypesCompanion.insert(name: '약 복용', iconName: const Value('medication'), colorValue: const Value(0xFF3F51B5), isPreset: const Value(true)));
-      });
-      if (ctx.mounted) { Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("모든 데이터가 완벽하게 초기화되었습니다."))); }
-    }, child: const Text("영구 파괴", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)))]));
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text("전체 초기화"),
+      content: const Text("모든 설정과 데이터를 초기화하시겠습니까?"),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+        TextButton(onPressed: () async {
+          await widget.database.transaction(() async {
+            await widget.database.delete(widget.database.customDataRecords).go();
+            await widget.database.delete(widget.database.customDataTypes).go();
+          });
+          final columns = MediaQuery.of(context).size.width > 600 ? 6 : 4;
+          await widget.database.fixDataIntegrity(columns: columns);
+          if (ctx.mounted) Navigator.pop(ctx);
+        }, child: const Text("초기화", style: TextStyle(color: Colors.red))),
+      ],
+    ));
   }
 }

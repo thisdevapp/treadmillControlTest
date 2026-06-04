@@ -765,31 +765,30 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
     final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
     final double centerX = (left + (dayIdx * dayWidth) + (dayWidth / 2)).roundToDouble();
 
+    // targetDate는 로컬 00:00이므로, dayStartUnix는 해당 시점의 UTC Epoch입니다.
     final dayStartUnix = targetDate.millisecondsSinceEpoch ~/ 1000;
     
     for (var r in records) {
       final type = types.firstWhere((t) => t.id == r.typeId, orElse: () => types[0]);
-      final rLocal = r.unixTimestamp + r.offsetSeconds;
-      final dayLocalStart = dayStartUnix + r.offsetSeconds;
       
       if (type.id == sleepType.id) {
         int? endUnix;
         if (r.value != null) {
           try { endUnix = json.decode(r.value!)['endUnix'] as int?; } catch (_) { endUnix = int.tryParse(r.value!); }
         }
-        final sLocalEnd = (endUnix ?? r.unixTimestamp) + r.offsetSeconds;
+        final sLocalEnd = endUnix ?? r.unixTimestamp;
         
-        final drawStart = math.max(rLocal, dayLocalStart);
-        final drawEnd = math.min(sLocalEnd, dayLocalStart + 86400);
+        final drawStart = math.max(r.unixTimestamp, dayStartUnix);
+        final drawEnd = math.min(sLocalEnd, dayStartUnix + 86400);
 
         if (drawStart < drawEnd) {
-          final double startY = metrics.topPadding + ((drawStart - dayLocalStart) / 86400.0) * chartHeight;
-          final double endY = metrics.topPadding + ((drawEnd - dayLocalStart) / 86400.0) * chartHeight;
+          final double startY = metrics.topPadding + ((drawStart - dayStartUnix) / 86400.0) * chartHeight;
+          final double endY = metrics.topPadding + ((drawEnd - dayStartUnix) / 86400.0) * chartHeight;
           
           if (pos.dx >= centerX - metrics.barWidth/2 && pos.dx <= centerX + metrics.barWidth/2 && pos.dy >= startY && pos.dy <= endY) {
-            final dtS = DateTime.fromMillisecondsSinceEpoch(rLocal * 1000, isUtc: true);
-            final dtE = DateTime.fromMillisecondsSinceEpoch(sLocalEnd * 1000, isUtc: true);
-            final durationStr = "${(sLocalEnd - rLocal) ~/ 3600}시간 ${((sLocalEnd - rLocal) % 3600) ~/ 60}분";
+            final dtS = DateTime.fromMillisecondsSinceEpoch((r.unixTimestamp + r.offsetSeconds) * 1000, isUtc: true);
+            final dtE = DateTime.fromMillisecondsSinceEpoch((sLocalEnd + r.offsetSeconds) * 1000, isUtc: true);
+            final durationStr = "${(sLocalEnd - r.unixTimestamp) ~/ 3600}시간 ${((sLocalEnd - r.unixTimestamp) % 3600) ~/ 60}분";
             return _HitInfo(
               recordId: r.id,
               hitType: 'sleep',
@@ -801,13 +800,14 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
           }
         }
       } else {
-        if (rLocal >= dayLocalStart && rLocal < dayLocalStart + 86400) {
-          final double fractionalDay = (rLocal - dayLocalStart) / 86400.0;
+        // 해당 날짜 범위에 있는지 검사
+        if (r.unixTimestamp >= dayStartUnix && r.unixTimestamp < dayStartUnix + 86400) {
+          final double fractionalDay = (r.unixTimestamp - dayStartUnix) / 86400.0;
           final double y = metrics.topPadding + fractionalDay * chartHeight;
-          final double touchTargetRadius = (metrics.medRadius * 1.8).clamp(18.0, 50.0);
+          final double touchTargetRadius = (metrics.medRadius * 2.0).clamp(20.0, 60.0);
           
           if ((pos - Offset(centerX, y)).distance <= touchTargetRadius) {
-            final dt = DateTime.fromMillisecondsSinceEpoch(rLocal * 1000, isUtc: true);
+            final dt = DateTime.fromMillisecondsSinceEpoch((r.unixTimestamp + r.offsetSeconds) * 1000, isUtc: true);
             final timeText = DateFormat('HH:mm').format(dt);
             return _HitInfo(
               recordId: r.id,
@@ -876,38 +876,36 @@ class SleepTimelinePainter extends CustomPainter {
       final List<math.Rectangle<double>> occupiedAreas = [];
 
       final dayRecords = records.where((r) {
-        final localUnix = r.unixTimestamp + r.offsetSeconds;
-        final dayLocalStart = dayStartUnix + r.offsetSeconds;
-        return localUnix >= dayLocalStart && localUnix < dayLocalStart + 86400;
+        // r.unixTimestamp는 UTC Epoch
+        // dayStartUnix는 해당 날짜 로컬 00:00의 UTC Epoch
+        // 따라서 단순히 r.unixTimestamp가 [dayStartUnix, dayStartUnix + 86400) 사이에 있는지 확인하면 됩니다.
+        return r.unixTimestamp >= dayStartUnix && r.unixTimestamp < dayStartUnix + 86400;
       }).toList();
 
       final sleepPaints = dayRecords.where((r) => r.typeId == sleepType.id).toList();
       final sleepPaint = Paint()..color = Color(sleepType.colorValue ?? 0xFF4CAF50).withOpacity(0.7)..style = PaintingStyle.fill;
 
       for (var r in sleepPaints) {
-        final sLocalStart = r.unixTimestamp + r.offsetSeconds;
-        final dayLocalStart = dayStartUnix + r.offsetSeconds;
-        
         int? endUnix;
         if (r.value != null) {
           try { endUnix = json.decode(r.value!)['endUnix'] as int?; } catch (_) { endUnix = int.tryParse(r.value!); }
         }
-        final sLocalEnd = (endUnix ?? r.unixTimestamp) + r.offsetSeconds;
+        final sLocalEnd = endUnix ?? r.unixTimestamp;
         
-        final drawStart = math.max(sLocalStart, dayLocalStart);
-        final drawEnd = math.min(sLocalEnd, dayLocalStart + 86400);
+        final drawStart = math.max(r.unixTimestamp, dayStartUnix);
+        final drawEnd = math.min(sLocalEnd, dayStartUnix + 86400);
 
         if (drawStart < drawEnd) {
-          final double startY = metrics.topPadding + ((drawStart - dayLocalStart) / 86400.0) * chartHeight;
-          final double endY = metrics.topPadding + ((drawEnd - dayLocalStart) / 86400.0) * chartHeight;
+          final double startY = metrics.topPadding + ((drawStart - dayStartUnix) / 86400.0) * chartHeight;
+          final double endY = metrics.topPadding + ((drawEnd - dayStartUnix) / 86400.0) * chartHeight;
           final double cornerRadius = metrics.barWidth / 2;
 
           canvas.drawRRect(RRect.fromRectAndCorners(
             Rect.fromLTRB(centerX - metrics.barWidth/2, startY, centerX + metrics.barWidth/2, endY), 
-            topLeft: sLocalStart >= dayLocalStart ? Radius.circular(cornerRadius) : Radius.zero, 
-            topRight: sLocalStart >= dayLocalStart ? Radius.circular(cornerRadius) : Radius.zero, 
-            bottomLeft: sLocalEnd <= dayLocalStart + 86400 ? Radius.circular(cornerRadius) : Radius.zero, 
-            bottomRight: sLocalEnd <= dayLocalStart + 86400 ? Radius.circular(cornerRadius) : Radius.zero
+            topLeft: r.unixTimestamp >= dayStartUnix ? Radius.circular(cornerRadius) : Radius.zero, 
+            topRight: r.unixTimestamp >= dayStartUnix ? Radius.circular(cornerRadius) : Radius.zero, 
+            bottomLeft: sLocalEnd <= dayStartUnix + 86400 ? Radius.circular(cornerRadius) : Radius.zero, 
+            bottomRight: sLocalEnd <= dayStartUnix + 86400 ? Radius.circular(cornerRadius) : Radius.zero
           ), sleepPaint);
 
           if (showAllDetails) {
@@ -915,7 +913,7 @@ class SleepTimelinePainter extends CustomPainter {
             final tpE = _getTextPainter(_formatUnix(endUnix, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
             bool barFitsLabels = (endY - startY) > (tpS.width + tpE.width + 20);
 
-            if (sLocalStart >= dayLocalStart) {
+            if (r.unixTimestamp >= dayStartUnix) {
               double proposedY = barFitsLabels ? startY + (metrics.valueFontSize * 0.9) : startY - 5;
               bool proposedAbove = !barFitsLabels;
               math.Rectangle rect = math.Rectangle(centerX - tpS.height/2, proposedAbove ? proposedY - tpS.width : proposedY, tpS.height, tpS.width);
@@ -928,7 +926,7 @@ class SleepTimelinePainter extends CustomPainter {
               occupiedAreas.add(math.Rectangle(centerX - tpS.height/2, proposedAbove ? proposedY - tpS.width : proposedY, tpS.height, tpS.width));
             }
 
-            if (sLocalEnd <= dayLocalStart + 86400) {
+            if (sLocalEnd <= dayStartUnix + 86400) {
               double proposedY = barFitsLabels ? endY - (metrics.valueFontSize * 0.9) : endY + 5;
               bool proposedAbove = barFitsLabels;
               math.Rectangle rect = math.Rectangle(centerX - tpE.height/2, proposedAbove ? proposedY - tpE.width : proposedY, tpE.height, tpE.width);
@@ -951,16 +949,14 @@ class SleepTimelinePainter extends CustomPainter {
         final typeColor = Color(type.colorValue ?? 0xFF3F51B5);
         final medPaint = Paint()..color = typeColor..style = PaintingStyle.fill;
 
-        final rLocal = r.unixTimestamp + r.offsetSeconds;
-        final dayLocalStart = dayStartUnix + r.offsetSeconds;
-        final double fractionalDay = (rLocal - dayLocalStart) / 86400.0;
+        final double fractionalDay = (r.unixTimestamp - dayStartUnix) / 86400.0;
         final double medY = metrics.topPadding + fractionalDay * chartHeight;
 
         canvas.drawCircle(Offset(centerX, medY), metrics.medRadius, medPaint);
         occupiedAreas.add(math.Rectangle(centerX - metrics.medRadius, medY - metrics.medRadius, metrics.medRadius * 2, metrics.medRadius * 2));
 
         if (showAllDetails) {
-          final dt = DateTime.fromMillisecondsSinceEpoch(rLocal * 1000, isUtc: true);
+          final dt = DateTime.fromMillisecondsSinceEpoch((r.unixTimestamp + r.offsetSeconds) * 1000, isUtc: true);
           final timeStr = DateFormat('HH:mm').format(dt);
           
           String txt = timeStr;

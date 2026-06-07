@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rxdart/rxdart.dart';
 import '../../database/database.dart';
 import '../widgets/custom_picker_utils.dart';
+import '../widgets/record_manager.dart';
 
 /// 모든 차트 요소의 크기와 패딩을 중앙 관리하는 클래스
 class _ChartMetrics {
@@ -486,18 +487,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   }
 
   IconData _getIconData(String? name) {
-    switch (name) {
-      case 'hotel': return Icons.hotel;
-      case 'medication': return Icons.medication;
-      case 'coffee': return Icons.local_cafe;
-      case 'smoke': return Icons.smoking_rooms;
-      case 'sports': return Icons.directions_run;
-      case 'beer': return Icons.local_bar;
-      case 'star': return Icons.star;
-      case 'favorite': return Icons.favorite;
-      case 'mood': return Icons.mood;
-      default: return Icons.category;
-    }
+    return RecordManager.getIconData(name);
   }
 
   Widget _menuItem(IconData i, String l, VoidCallback t) => InkWell(
@@ -519,125 +509,150 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   );
 
   Future<void> _pickCustomEventTime(CustomDataType type) async {
-    final d = await CustomPickerUtils.pickDate(context: context, initialDate: DateTime.now());
-    if (d == null) return;
-    final t = await CustomPickerUtils.pickTime(context: context, initialTime: TimeOfDay.now());
-    if (t == null) return;
-    
-    final finalTime = DateTime(d.year, d.month, d.day, t.hour, t.minute);
-    
-    if (mounted) {
-      final memoController = TextEditingController();
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text("${type.name} 입력"),
-          content: TextField(
-            controller: memoController,
-            decoration: const InputDecoration(
-              labelText: "추가 세부 사항 (선택)",
-              hintText: "예: 졸피뎀 10mg, 아메리카노 등",
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-            FilledButton(
-              onPressed: () async {
-                await widget.database.addCustomDataRecord(
-                  typeId: type.id,
-                  timestamp: finalTime,
-                  value: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
-                );
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text("저장"),
-            )
-          ],
-        ),
-      );
-    }
+    await RecordManager.showAddPastRecordDialog(
+      context: context,
+      database: widget.database,
+      type: type,
+      onShowToast: (t, msg) => RecordManager.showRecordToast(context, t, msg),
+    );
   }
 
   Future<void> _pickSleepPeriod(int sleepTypeId) async {
-    final d = await CustomPickerUtils.pickDate(context: context, initialDate: DateTime.now());
-    if (d == null) return;
-    final sT = await CustomPickerUtils.pickTime(context: context, initialTime: const TimeOfDay(hour: 22, minute: 0), helpText: "수면 시작");
-    if (sT == null) return;
-    final eT = await CustomPickerUtils.pickTime(context: context, initialTime: const TimeOfDay(hour: 7, minute: 0), helpText: "기상 시각");
-    if (eT == null) return;
-    
-    final start = DateTime(d.year, d.month, d.day, sT.hour, sT.minute);
-    var end = DateTime(d.year, d.month, d.day, eT.hour, eT.minute);
-    if (end.isBefore(start)) end = end.add(const Duration(days: 1));
+    await RecordManager.showSleepLogDialog(
+      context: context,
+      database: widget.database,
+      sleepTypeId: sleepTypeId,
+      onShowToast: (t, msg) => RecordManager.showRecordToast(context, t, msg),
+    );
+  }
 
-    if (mounted) {
-      int quality = 3;
-      final memoController = TextEditingController();
-
-      showDialog(
-        context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (ctx, setStateDlg) => AlertDialog(
-            title: const Text("수면 만족도 기입"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text("만족도를 탭해서 선택하세요:"),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(5, (idx) {
-                    return IconButton(
-                      icon: Icon(idx < quality ? Icons.star : Icons.star_border, color: Colors.amber, size: 28),
-                      onPressed: () => setStateDlg(() => quality = idx + 1),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: memoController,
-                  decoration: const InputDecoration(labelText: "수면 특이사항 메모 (선택)", border: OutlineInputBorder()),
-                )
-              ],
+  void _executeLongPress(_HitInfo hit) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(hit.titleText, style: const TextStyle(fontWeight: FontWeight.bold)),
+            IconButton(
+              onPressed: () => Navigator.pop(ctx),
+              icon: const Icon(Icons.close_rounded, color: Colors.grey),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
             ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-              FilledButton(
-                onPressed: () async {
-                  final valueJson = json.encode({
-                    'endUnix': end.millisecondsSinceEpoch ~/ 1000,
-                    'quality': quality,
-                    'memo': memoController.text.trim(),
-                  });
-                  await widget.database.addCustomDataRecord(
-                    typeId: sleepTypeId,
-                    timestamp: start,
-                    value: valueJson,
-                  );
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-                child: const Text("완료"),
-              )
-            ],
-          ),
+          ],
         ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch, // 버튼이 가로로 꽉 차도록 설정
+          children: [
+            Text(hit.subtitleText, style: const TextStyle(fontSize: 16)),
+            const SizedBox(height: 24),
+            const Text("수행할 동작을 선택하세요", 
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)
+            ),
+            const SizedBox(height: 16),
+            
+            // 수정 버튼 (한 라인 차지)
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _editRecord(hit);
+              },
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.edit_rounded),
+              label: const Text("기록 수정하기", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // 삭제 버튼 (한 라인 차지)
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _confirmDelete(hit);
+              },
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: const BorderSide(color: Colors.red, width: 1.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+              label: const Text("기록 삭제하기", style: TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+        actions: const [],
+      ),
+    );
+  }
+
+  Future<void> _editRecord(_HitInfo hit) async {
+    // DB에서 최신 데이터 가져오기 (문법 수정: widget.database.select 사용)
+    final r = await (widget.database.select(widget.database.customDataRecords)
+          ..where((t) => t.id.equals(hit.recordId)))
+        .getSingle();
+
+    final types = await widget.database.getCustomDataTypes();
+    final type = types.firstWhere((t) => t.id == r.typeId);
+
+    if (!mounted) return;
+
+    if (hit.hitType == 'sleep') {
+      int? endUnix;
+      String? memo;
+      try {
+        final decoded = json.decode(r.value!);
+        endUnix = decoded['endUnix'] as int?;
+        memo = decoded['memo'] as String?;
+      } catch (_) {}
+
+      RecordManager.showSleepLogDialog(
+        context: context,
+        database: widget.database,
+        sleepTypeId: r.typeId,
+        onShowToast: (t, msg) => RecordManager.showRecordToast(context, t, msg),
+        existingRecordId: r.id,
+        initialStart: DateTime.fromMillisecondsSinceEpoch(r.unixTimestamp * 1000),
+        initialEnd: endUnix != null ? DateTime.fromMillisecondsSinceEpoch(endUnix * 1000) : null,
+        initialMemo: memo,
+      );
+    } else {
+      // 일반 기록 수정 (시간만 수정하는 팝업 호출)
+      RecordManager.showAddPastRecordDialog(
+        context: context,
+        database: widget.database,
+        type: type,
+        onShowToast: (t, msg) => RecordManager.showRecordToast(context, t, msg),
+        existingRecordId: r.id,
+        initialTimestamp: DateTime.fromMillisecondsSinceEpoch(r.unixTimestamp * 1000),
+        initialValue: r.value,
       );
     }
   }
 
-  void _executeLongPress(_HitInfo hit) {
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: Text(hit.titleText), 
-      content: Text("${hit.subtitleText}\n\n정말로 이 기록을 완전히 삭제하시겠습니까?"),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-        TextButton(onPressed: () async {
-          await widget.database.deleteCustomDataRecord(hit.recordId);
-          if(mounted) Navigator.pop(ctx);
-        }, child: const Text("삭제", style: TextStyle(color: Colors.red))),
-      ],
-    ));
+  void _confirmDelete(_HitInfo hit) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("기록 삭제"),
+        content: const Text("정말로 이 기록을 완전히 삭제하시겠습니까?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+          TextButton(
+            onPressed: () async {
+              await widget.database.deleteCustomDataRecord(hit.recordId);
+              if (mounted) Navigator.pop(ctx);
+            },
+            child: const Text("삭제", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -667,6 +682,8 @@ class _StatisticsPageContent extends StatefulWidget {
 class _StatisticsPageContentState extends State<_StatisticsPageContent> {
   Stream<Map<String, dynamic>>? _pageStream;
   Timer? _longPressTimer;
+  Offset? _tapDownPos;
+  static const double _dragSlop = 20.0; // 드래그 무시 범위 (픽셀)
 
   @override
   void initState() {
@@ -724,12 +741,45 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
               onTapDown: (details) {
                 final hit = _checkHit(details.localPosition, pageDates, records, types, dayWidth, widget.yAxisWidth, constraints.maxHeight);
                 if (hit != null) {
+                  _tapDownPos = details.localPosition;
                   _longPressTimer?.cancel();
-                  _longPressTimer = Timer(Duration(milliseconds: (widget.longPressSeconds * 1000).toInt()), () => widget.onExecuteLongPress(hit));
+                  // widget.longPressSeconds를 사용하여 설정값 실시간 반영
+                  _longPressTimer = Timer(
+                    Duration(milliseconds: (widget.longPressSeconds * 1000).toInt()), 
+                    () {
+                      if (mounted && _tapDownPos != null) {
+                        widget.onExecuteLongPress(hit);
+                        _tapDownPos = null;
+                      }
+                    }
+                  );
                 }
               },
-              onTapUp: (_) => _longPressTimer?.cancel(),
-              onTapCancel: () => _longPressTimer?.cancel(),
+              onPanUpdate: (details) {
+                if (_tapDownPos != null) {
+                  final distance = (details.localPosition - _tapDownPos!).distance;
+                  if (distance > _dragSlop) {
+                    _longPressTimer?.cancel();
+                    _tapDownPos = null;
+                  }
+                }
+              },
+              onTapUp: (_) {
+                _longPressTimer?.cancel();
+                _tapDownPos = null;
+              },
+              onTapCancel: () {
+                _longPressTimer?.cancel();
+                _tapDownPos = null;
+              },
+              onPanEnd: (_) {
+                _longPressTimer?.cancel();
+                _tapDownPos = null;
+              },
+              onPanCancel: () {
+                _longPressTimer?.cancel();
+                _tapDownPos = null;
+              },
               child: CustomPaint(
                 size: Size(constraints.maxWidth, constraints.maxHeight),
                 painter: SleepTimelinePainter(
@@ -765,8 +815,10 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
     final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
     final double centerX = (left + (dayIdx * dayWidth) + (dayWidth / 2)).roundToDouble();
 
-    // targetDate는 로컬 00:00이므로, dayStartUnix는 해당 시점의 UTC Epoch입니다.
     final dayStartUnix = targetDate.millisecondsSinceEpoch ~/ 1000;
+    
+    // 터치 보정 범위 확대 (14일/30일 보기 대응)
+    final double horizontalHitRange = math.max(metrics.barWidth / 2 + 10, 20.0);
     
     for (var r in records) {
       final type = types.firstWhere((t) => t.id == r.typeId, orElse: () => types[0]);
@@ -785,26 +837,27 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
           final double startY = metrics.topPadding + ((drawStart - dayStartUnix) / 86400.0) * chartHeight;
           final double endY = metrics.topPadding + ((drawEnd - dayStartUnix) / 86400.0) * chartHeight;
           
-          if (pos.dx >= centerX - metrics.barWidth/2 && pos.dx <= centerX + metrics.barWidth/2 && pos.dy >= startY && pos.dy <= endY) {
+          // 가로 터치 범위 보정
+          if (pos.dx >= centerX - horizontalHitRange && pos.dx <= centerX + horizontalHitRange && pos.dy >= startY - 5 && pos.dy <= endY + 5) {
             final dtS = DateTime.fromMillisecondsSinceEpoch((r.unixTimestamp + r.offsetSeconds) * 1000, isUtc: true);
             final dtE = DateTime.fromMillisecondsSinceEpoch((sLocalEnd + r.offsetSeconds) * 1000, isUtc: true);
             final durationStr = "${(sLocalEnd - r.unixTimestamp) ~/ 3600}시간 ${((sLocalEnd - r.unixTimestamp) % 3600) ~/ 60}분";
             return _HitInfo(
               recordId: r.id,
               hitType: 'sleep',
-              titleText: "수면 기록 삭제",
-              subtitleText: "기록 범위: ${DateFormat('HH:mm').format(dtS)} ~ ${DateFormat('HH:mm').format(dtE)} ($durationStr)",
+              titleText: "수면 기록 관리",
+              subtitleText: "기간: ${DateFormat('HH:mm').format(dtS)} ~ ${DateFormat('HH:mm').format(dtE)} ($durationStr)",
               targetPos: Offset(centerX, pos.dy),
               displayDate: DateFormat('yyyy-MM-dd').format(targetDate),
             );
           }
         }
       } else {
-        // 해당 날짜 범위에 있는지 검사
         if (r.unixTimestamp >= dayStartUnix && r.unixTimestamp < dayStartUnix + 86400) {
           final double fractionalDay = (r.unixTimestamp - dayStartUnix) / 86400.0;
           final double y = metrics.topPadding + fractionalDay * chartHeight;
-          final double touchTargetRadius = (metrics.medRadius * 2.0).clamp(20.0, 60.0);
+          // 터치 타겟 반경 확대
+          final double touchTargetRadius = math.max(metrics.medRadius * 2.5, 25.0);
           
           if ((pos - Offset(centerX, y)).distance <= touchTargetRadius) {
             final dt = DateTime.fromMillisecondsSinceEpoch((r.unixTimestamp + r.offsetSeconds) * 1000, isUtc: true);
@@ -812,7 +865,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> {
             return _HitInfo(
               recordId: r.id,
               hitType: 'custom',
-              titleText: "${type.name} 기록 삭제",
+              titleText: "${type.name} 기록 관리",
               subtitleText: "시각: $timeText\n내용: ${r.value ?? '단순 기록'}",
               targetPos: Offset(centerX, y),
               displayDate: DateFormat('yyyy-MM-dd').format(targetDate),

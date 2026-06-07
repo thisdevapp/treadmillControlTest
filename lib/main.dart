@@ -17,6 +17,13 @@ void main() async {
 
   // 데이터베이스 초기화 (신규 Unix Timestamp 스키마 버전 6)
   final database = AppDatabase();
+  
+  // 최초 실행 시 기본 데이터 유무 확인 및 복구
+  final types = await database.getCustomDataTypes();
+  if (types.isEmpty) {
+    debugPrint("🆕 최초 실행: 기본 프리셋 데이터 생성 중...");
+    await database.fixDataIntegrity();
+  }
 
   runApp(SleepTrackerApp(
     initialThemeMode: initialThemeMode,
@@ -58,19 +65,18 @@ class _SleepTrackerAppState extends State<SleepTrackerApp> {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint("🏗️ SleepTrackerApp build 시작");
     return MaterialApp(
       title: 'Sleep Prototype',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.indigo,
-        fontFamily: 'NanumGothic',
         brightness: Brightness.light,
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.indigo,
-        fontFamily: 'NanumGothic',
         brightness: Brightness.dark,
       ),
       themeMode: _themeMode,

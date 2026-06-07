@@ -316,6 +316,36 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> deleteCustomDataRecord(int id) => (delete(customDataRecords)..where((t) => t.id.equals(id))).go();
 
+  Future<void> updateCustomDataRecord(int id, {DateTime? timestamp, String? value}) {
+    return (update(customDataRecords)..where((t) => t.id.equals(id))).write(
+      CustomDataRecordsCompanion(
+        unixTimestamp: timestamp != null ? Value(timestamp.millisecondsSinceEpoch ~/ 1000) : const Value.absent(),
+        value: value != null ? Value(value) : const Value.absent(),
+      ),
+    );
+  }
+
+  Future<void> updateRecordsValueInPeriod({
+    required int typeId,
+    required DateTime start,
+    required DateTime end,
+    required String value,
+  }) async {
+    final startUnix = start.millisecondsSinceEpoch ~/ 1000;
+    final endUnix = end.millisecondsSinceEpoch ~/ 1000;
+    await (update(customDataRecords)
+          ..where((t) => t.typeId.equals(typeId) & t.unixTimestamp.isBetweenValues(startUnix, endUnix)))
+        .write(CustomDataRecordsCompanion(value: Value(value)));
+  }
+
+  Future<CustomDataRecord?> getLastRecord(int typeId) {
+    return (select(customDataRecords)
+          ..where((t) => t.typeId.equals(typeId))
+          ..orderBy([(t) => OrderingTerm(expression: t.unixTimestamp, mode: OrderingMode.desc)])
+          ..limit(1))
+        .getSingleOrNull();
+  }
+
   Future<List<String>> getRecentRecordValues(int typeId) async {
     final query = select(customDataRecords)
       ..where((t) => t.typeId.equals(typeId) & t.value.isNotNull())

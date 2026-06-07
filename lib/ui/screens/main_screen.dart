@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:drift/drift.dart' show Value;
 import '../../database/database.dart';
 import '../widgets/custom_picker_utils.dart';
+import '../widgets/record_manager.dart';
 import 'statistics_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -72,24 +73,12 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   IconData _getIconData(String? name) {
-    switch (name) {
-      case 'hotel': return Icons.hotel_rounded;
-      case 'medication': return Icons.medication_rounded;
-      case 'coffee': return Icons.local_cafe_rounded;
-      case 'smoke': return Icons.smoking_rooms_rounded;
-      case 'sports': return Icons.directions_run_rounded;
-      case 'beer': return Icons.local_bar_rounded;
-      case 'star': return Icons.star_rounded;
-      case 'favorite': return Icons.favorite_rounded;
-      case 'mood': return Icons.mood_rounded;
-      case 'water': return Icons.water_drop_rounded;
-      case 'food': return Icons.restaurant_rounded;
-      default: return Icons.category_rounded;
-    }
+    return RecordManager.getIconData(name);
   }
 
   @override
   Widget build(BuildContext context) {
+    debugPrint("🏗️ MainScreen build 시작 (Theme: ${Theme.of(context).brightness})");
     return Scaffold(
       backgroundColor: Theme.of(context).brightness == Brightness.light ? const Color(0xFFF0F2F8) : const Color(0xFF101012),
       appBar: AppBar(
@@ -139,8 +128,18 @@ class _MainScreenState extends State<MainScreen> {
     return StreamBuilder<List<CustomDataType>>(
       stream: widget.database.watchCustomDataTypes(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) {
+          debugPrint("❌ StreamBuilder 에러 발생: ${snapshot.error}");
+          return Center(child: Text("데이터 로드 에러: ${snapshot.error}"));
+        }
+        
+        if (!snapshot.hasData) {
+          debugPrint("⏳ 데이터 대기 중 (StreamBuilder)...");
+          return const Center(child: CircularProgressIndicator());
+        }
+        
         final types = snapshot.data!;
+        debugPrint("📊 대시보드 위젯 개수: ${types.length}");
         
         // 데이터가 전혀 없는 경우 프리셋 버튼 생성 제안
         if (types.isEmpty) {
@@ -166,6 +165,13 @@ class _MainScreenState extends State<MainScreen> {
         }
 
         return LayoutBuilder(builder: (context, constraints) {
+          debugPrint("📏 LayoutBuilder 제약 조건: ${constraints.maxWidth} x ${constraints.maxHeight}");
+          
+          // 제약 조건이 너무 작으면 렌더링 스킵
+          if (constraints.maxWidth < 100 || constraints.maxHeight < 100) {
+            return const Center(child: Text("화면 크기 대기 중..."));
+          }
+
           // 세로 방향으로 스크롤 없이 보이기 위해 타겟 행(Row) 설정
           final double horizontalPadding = 48; // (24 * 2)
           final double verticalPadding = 48;
@@ -421,40 +427,40 @@ class _MainScreenState extends State<MainScreen> {
     final IconData iconData = _getIconData(type.iconName);
 
     if (isHorizontal) {
-      // [가로형 레이아웃] 아이콘 좌측, 텍스트 우측
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-        child: Row(
-          children: [
-            // 아이콘 영역 (정사각 유지)
-            AspectRatio(
-              aspectRatio: 1,
-              child: LayoutBuilder(builder: (context, constraints) {
-                return Icon(iconData, color: foregroundColor, size: constraints.maxHeight * 0.5);
-              }),
-            ),
-            const SizedBox(width: 8),
-            // 텍스트 영역
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(type.name,
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5,
-                            color: foregroundColor)),
+      // [가로형 레이아웃] 텍스트 길이에 반응하는 유동적 중앙 정렬
+      return LayoutBuilder(builder: (context, constraints) {
+        final double minSide = constraints.maxWidth < constraints.maxHeight
+            ? constraints.maxWidth
+            : constraints.maxHeight;
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0),
+          alignment: Alignment.center, // 전체 그룹을 중앙에 배치
+          child: Row(
+            mainAxisSize: MainAxisSize.min, // 내용물 크기만큼만 Row 크기 설정
+            children: [
+              // 아이콘: 위젯 높이에 비례한 적절한 크기 유지
+              Icon(iconData, color: foregroundColor, size: minSide * 0.5),
+              const SizedBox(width: 8),
+              // 텍스트: Flexible을 사용하여 길이에 따라 유동적으로 변화
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    type.name,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.5,
+                      color: foregroundColor,
+                    ),
                   ),
-                ],
+                ),
               ),
-            ),
-          ],
-        ),
-      );
+            ],
+          ),
+        );
+      });
     } else {
       // [세로형/정사각 레이아웃] 아이콘 중앙, 텍스트 하단
       return LayoutBuilder(builder: (context, constraints) {
@@ -529,44 +535,24 @@ class _MainScreenState extends State<MainScreen> {
   void _onWidgetTap(CustomDataType type) {
     HapticFeedback.mediumImpact(); // 햅틱 반응 추가
     if (type.name == '수면') {
-      _showSleepLogDialog(type.id);
+      RecordManager.showSleepLogDialog(
+        context: context,
+        database: widget.database,
+        sleepTypeId: type.id,
+        onShowToast: _showToast,
+      );
     } else {
-      _quickLogEvent(type);
+      RecordManager.quickLogEvent(
+        context: context,
+        database: widget.database,
+        type: type,
+        onShowToast: _showToast,
+      );
     }
   }
 
-  Future<void> _quickLogEvent(CustomDataType type) async {
-    final now = DateTime.now();
-    await widget.database.addCustomDataRecord(typeId: type.id, timestamp: now);
-    _showToast(type, "${type.name} 기록 완료");
-  }
-
   void _showToast(CustomDataType type, String message) {
-    if (!mounted) return;
-    final color = Color(type.colorValue ?? Colors.indigo.value);
-    final onColor = Theme.of(context).scaffoldBackgroundColor;
-
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(_getIconData(type.iconName), color: onColor, size: 20),
-            const SizedBox(width: 12),
-            Text(
-              message,
-              style: TextStyle(color: onColor, fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-          ],
-        ),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        duration: const Duration(seconds: 2),
-        elevation: 4,
-      ),
-    );
+    RecordManager.showRecordToast(context, type, message);
   }
 
   void _showLayoutEditDialog(CustomDataType type) {
@@ -597,53 +583,6 @@ class _MainScreenState extends State<MainScreen> {
     )));
   }
 
-  Future<void> _showPastRecordDialog(CustomDataType type) async {
-    final d = await CustomPickerUtils.pickDate(context: context, initialDate: DateTime.now());
-    if (d == null) return;
-    final t = await CustomPickerUtils.pickTime(context: context, initialTime: TimeOfDay.now());
-    if (t == null) return;
-    
-    final finalTime = DateTime(d.year, d.month, d.day, t.hour, t.minute);
-    
-    if (mounted) {
-      final memoController = TextEditingController();
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text("${type.name} 과거 기록 추가"),
-          content: TextField(
-            controller: memoController,
-            maxLines: 5,
-            minLines: 3,
-            decoration: const InputDecoration(
-              labelText: "세부 내용 (선택)",
-              hintText: "예:\n- 졸피뎀 10mg\n- 마그네슘 200mg\n- 아메리카노",
-              alignLabelWithHint: true,
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-            FilledButton(
-              onPressed: () async {
-                await widget.database.addCustomDataRecord(
-                  typeId: type.id,
-                  timestamp: finalTime,
-                  value: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
-                );
-                if (ctx.mounted) {
-                  Navigator.pop(ctx);
-                  _showToast(type, "${type.name} 과거 기록 추가됨");
-                }
-              },
-              child: const Text("저장"),
-            )
-          ],
-        ),
-      );
-    }
-  }
-
   void _showWidgetMenu(CustomDataType type) {
     final color = Color(type.colorValue ?? Colors.indigo.value);
     final onColor = Theme.of(context).scaffoldBackgroundColor;
@@ -663,7 +602,12 @@ class _MainScreenState extends State<MainScreen> {
                 icon: Icons.add_circle_outline_rounded,
                 label: "지금 기록 추가",
                 onColor: onColor,
-                onTap: () => _quickLogEvent(type),
+                onTap: () => RecordManager.quickLogEvent(
+                  context: context,
+                  database: widget.database,
+                  type: type,
+                  onShowToast: _showToast,
+                ),
               ),
               const Divider(color: Colors.white24, indent: 16, endIndent: 16),
             ],
@@ -674,9 +618,19 @@ class _MainScreenState extends State<MainScreen> {
               onColor: onColor,
               onTap: () {
                 if (type.name == '수면') {
-                  _showSleepLogDialog(type.id);
+                  RecordManager.showSleepLogDialog(
+                    context: context,
+                    database: widget.database,
+                    sleepTypeId: type.id,
+                    onShowToast: _showToast,
+                  );
                 } else {
-                  _showPastRecordDialog(type);
+                  RecordManager.showAddPastRecordDialog(
+                    context: context,
+                    database: widget.database,
+                    type: type,
+                    onShowToast: _showToast,
+                  );
                 }
               },
             ),
@@ -686,7 +640,12 @@ class _MainScreenState extends State<MainScreen> {
               icon: Icons.note_add_rounded,
               label: "메모 추가",
               onColor: onColor,
-              onTap: () => _showMemoDialog(type),
+              onTap: () => RecordManager.showMemoDialog(
+                context: context,
+                database: widget.database,
+                type: type,
+                onShowToast: _showToast,
+              ),
             ),
             const Divider(color: Colors.white24, indent: 16, endIndent: 16),
             _menuOption(
@@ -711,45 +670,6 @@ class _MainScreenState extends State<MainScreen> {
         Navigator.pop(dialogCtx);
         onTap();
       },
-    );
-  }
-
-  void _showMemoDialog(CustomDataType type) {
-    final memoController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text("${type.name} 메모 기록"),
-        content: TextField(
-          controller: memoController,
-          autofocus: true,
-          maxLines: 5,
-          minLines: 3,
-          decoration: const InputDecoration(
-            labelText: "메모 입력",
-            hintText: "예:\n- 타이레놀 1알\n- 비타민C 1000mg",
-            alignLabelWithHint: true,
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-          FilledButton(
-            onPressed: () async {
-              await widget.database.addCustomDataRecord(
-                typeId: type.id,
-                timestamp: DateTime.now(),
-                value: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
-              );
-              if (ctx.mounted) {
-                Navigator.pop(ctx);
-                _showToast(type, "${type.name} 기록됨");
-              }
-            },
-            child: const Text("기록"),
-          ),
-        ],
-      ),
     );
   }
 
@@ -797,39 +717,6 @@ class _MainScreenState extends State<MainScreen> {
           onSaved();
           if (ctx.mounted) Navigator.pop(ctx);
         }, child: Text(isEdit ? "수정 완료" : "생성")),
-      ],
-    )));
-  }
-
-  void _showSleepLogDialog(int sleepTypeId) {
-    final now = DateTime.now();
-    DateTime startDT = DateTime(now.year, now.month, now.day, 22, 0);
-    DateTime endDT = DateTime(now.year, now.month, now.day, 7, 0).add(const Duration(days: 1));
-    int quality = 3;
-    final memoController = TextEditingController();
-
-    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(
-      title: const Text("수면 기록"),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        OutlinedButton(onPressed: () async { final d = await CustomPickerUtils.pickDate(context: context, initialDate: startDT); if (d != null) setDlgState(() => startDT = DateTime(d.year, d.month, d.day, startDT.hour, startDT.minute)); }, child: Text("취침: ${DateFormat('MM/dd HH:mm').format(startDT)}")),
-        OutlinedButton(onPressed: () async { final d = await CustomPickerUtils.pickDate(context: context, initialDate: endDT); if (d != null) setDlgState(() => endDT = DateTime(d.year, d.month, d.day, endDT.hour, endDT.minute)); }, child: Text("기상: ${DateFormat('MM/dd HH:mm').format(endDT)}")),
-        const SizedBox(height: 16),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(5, (i) => IconButton(icon: Icon(i < quality ? Icons.star : Icons.star_border, color: Colors.amber), onPressed: () => setDlgState(() => quality = i + 1)))),
-        TextField(controller: memoController, decoration: const InputDecoration(labelText: "메모")),
-      ]),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-        FilledButton(onPressed: () async {
-          final val = jsonEncode({'endUnix': endDT.millisecondsSinceEpoch ~/ 1000, 'quality': quality, 'memo': memoController.text});
-          await widget.database.addCustomDataRecord(typeId: sleepTypeId, timestamp: startDT, value: val);
-          if (ctx.mounted) {
-            Navigator.pop(ctx);
-            // 수면 타입 정보를 가져와서 토스트 표시
-            final types = await widget.database.getCustomDataTypes();
-            final sleepType = types.firstWhere((t) => t.id == sleepTypeId);
-            _showToast(sleepType, "수면 기록 저장됨");
-          }
-        }, child: const Text("저장")),
       ],
     )));
   }

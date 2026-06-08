@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ESP32-C3 USB Serial/JTAG Controller (VID: 0x303A, PID: 0x1001) -->
+    <usb-device vendor-id="12346" product-id="4097" />
+
+    <!-- Standard ESP32-C3 might also use other IDs if using external bridge, but 0x303A/0x1001 is common for internal -->
+    <!-- You can add more vendor-id and product-id tags here for other devices -->
+</resources>

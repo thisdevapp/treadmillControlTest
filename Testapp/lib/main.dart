@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:usb_serial/usb_serial.dart';
 
 void main() {
@@ -38,12 +39,21 @@ class ControlDashboard extends StatefulWidget {
   State<ControlDashboard> createState() => _ControlDashboardState();
 }
 
-class _ControlDashboardState extends State<ControlDashboard> {
+class _ControlDashboardState extends State<ControlDashboard> with SingleTickerProviderStateMixin {
   // USB Serial State
   UsbPort? _port;
+  UsbDevice? _connectedDevice;
+  Map<String, dynamic>? _lastDeviceIdentity;
   List<UsbDevice> _devices = [];
   StreamSubscription<Uint8List>? _subscription;
   String _inputBuffer = "";
+  Timer? _connectionCheckTimer;
+  Timer? _demoSimulationTimer;
+  bool _isAlertShowing = false;
+  bool _isDeviceSelectorShowing = false;
+
+  // Animation for USB Icon
+  late AnimationController _pulseController;
 
   // Treadmill State
   bool _isRunning = false;
@@ -70,14 +80,176 @@ class _ControlDashboardState extends State<ControlDashboard> {
   void initState() {
     super.initState();
     _initLogging();
-    UsbSerial.usbEventStream?.listen((event) => _refreshDevices());
+    _loadSavedDevice();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat(reverse: true);
+    UsbSerial.usbEventStream?.listen((event) {
+      _refreshDevices();
+      if (event.event == UsbEvent.ACTION_USB_ATTACHED) {
+        _handleUsbAttached();
+      }
+    });
     _refreshDevices();
+    _startConnectionTimer();
+  }
+
+  Future<void> _handleUsbAttached() async {
+    // Wait a bit for devices to be fully recognized by the system
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+
+    final currentDevices = await UsbSerial.listDevices();
+    bool knownDevicePresent = false;
+
+    if (_lastDeviceIdentity != null) {
+      for (var device in currentDevices) {
+        if (device.vid == _lastDeviceIdentity!['vid'] &&
+            device.pid == _lastDeviceIdentity!['pid'] &&
+            device.deviceName == _lastDeviceIdentity!['deviceName']) {
+          knownDevicePresent = true;
+          break;
+        }
+      }
+    }
+
+    if (knownDevicePresent) {
+      _log("Known device detected upon attachment. Skipping popup.");
+      // The periodic connection timer or a manual check will handle the actual connection
+      await _checkConnectionStatus();
+    } else {
+      // Only show selector if no known device is present and we're not connected
+      if (_port == null && !_isDeviceSelectorShowing && !_isAlertShowing) {
+        _log("Unknown device detected. Showing device selector.");
+        _showDeviceSelector(context);
+      }
+    }
   }
 
   @override
   void dispose() {
+    _pulseController.dispose();
+    _connectionCheckTimer?.cancel();
+    _demoSimulationTimer?.cancel();
     _disconnect();
     super.dispose();
+  }
+
+  void _startDemoSimulation() {
+    _demoSimulationTimer?.cancel();
+    _demoSimulationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        if (_isRunning) {
+          // Ramping up to target
+          double targetKmH = _targetSpeed / 1000.0;
+          if (_currentSpeed < targetKmH) {
+            _currentSpeed += (targetKmH / 10); // Ramp up in 10 seconds
+            if (_currentSpeed > targetKmH) _currentSpeed = targetKmH;
+          } else if (_currentSpeed > targetKmH) {
+            _currentSpeed -= (targetKmH / 10);
+            if (_currentSpeed < targetKmH) _currentSpeed = targetKmH;
+          }
+
+          // Counting down
+          if (_elapsedSeconds > 0) {
+            _elapsedSeconds--;
+          } else {
+            _isRunning = false; // Auto stop when timer hits zero
+          }
+        } else {
+          // Ramping down to zero
+          if (_currentSpeed > 0) {
+            _currentSpeed -= 0.5; // Fixed decrease for stopping feel
+            if (_currentSpeed < 0) _currentSpeed = 0;
+          } else {
+            _currentSpeed = 0;
+            _demoSimulationTimer?.cancel();
+          }
+          _elapsedSeconds = 0;
+        }
+      });
+    });
+  }
+
+  void _startConnectionTimer() {
+    _connectionCheckTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      _checkConnectionStatus();
+    });
+  }
+
+  Future<void> _checkConnectionStatus() async {
+    final currentDevices = await UsbSerial.listDevices();
+
+    if (_port != null) {
+      // Current Connection Check
+      bool deviceStillPresent = false;
+      for (var device in currentDevices) {
+        if (_connectedDevice != null &&
+            device.vid == _connectedDevice!.vid &&
+            device.pid == _connectedDevice!.pid &&
+            device.deviceName == _connectedDevice!.deviceName) {
+          deviceStillPresent = true;
+          break;
+        }
+      }
+
+      if (!deviceStillPresent) {
+        _log("CRITICAL: Connected device lost from USB list.");
+        _handleUnexpectedDisconnection();
+      }
+    } else {
+      // Auto-Reconnection Check
+      if (_lastDeviceIdentity != null) {
+        for (var device in currentDevices) {
+          if (device.vid == _lastDeviceIdentity!['vid'] &&
+              device.pid == _lastDeviceIdentity!['pid'] &&
+              device.deviceName == _lastDeviceIdentity!['deviceName']) {
+            _log("Auto-reconnection: Found last known device. Attempting connect...");
+            _connect(device);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  void _handleUnexpectedDisconnection() {
+    _disconnect(isManual: false);
+    if (!_isAlertShowing) {
+      _showDisconnectionAlert();
+    }
+  }
+
+  void _showDisconnectionAlert() {
+    _isAlertShowing = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.red),
+            SizedBox(width: 10),
+            Text("Connection Lost"),
+          ],
+        ),
+        content: const Text("USB connection to the device has been lost. Please check the cable and try reconnecting."),
+        actions: [
+          FilledButton(
+            onPressed: () {
+              if (Navigator.canPop(context)) {
+                Navigator.pop(context);
+              }
+              _isAlertShowing = false;
+            },
+            child: const Text("CONFIRM"),
+          ),
+        ],
+      ),
+    ).then((_) {
+      _isAlertShowing = false;
+    });
   }
 
   // --- Logging Logic ---
@@ -87,6 +259,42 @@ class _ControlDashboardState extends State<ControlDashboard> {
     final path = "${directory.path}/app_debug_log.txt";
     _logFile = File(path);
     _log("LOGGING INITIALIZED. File at: $path");
+  }
+
+  Future<void> _loadSavedDevice() async {
+    final prefs = await SharedPreferences.getInstance();
+    final vid = prefs.getInt('last_vid');
+    final pid = prefs.getInt('last_pid');
+    final name = prefs.getString('last_name');
+
+    if (vid != null && pid != null && name != null) {
+      setState(() {
+        _lastDeviceIdentity = {
+          'vid': vid,
+          'pid': pid,
+          'deviceName': name,
+        };
+      });
+      _log("Loaded saved device: $name (VID: $vid, PID: $pid)");
+      // Check immediately if it's already plugged in
+      _checkConnectionStatus();
+    }
+  }
+
+  Future<void> _saveDevice(UsbDevice device) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('last_vid', device.vid ?? 0);
+    await prefs.setInt('last_pid', device.pid ?? 0);
+    await prefs.setString('last_name', device.deviceName ?? "");
+    _log("Saved device to storage: ${device.deviceName}");
+  }
+
+  Future<void> _clearSavedDevice() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('last_vid');
+    await prefs.remove('last_pid');
+    await prefs.remove('last_name');
+    _log("Cleared saved device from storage.");
   }
 
   void _log(String message) {
@@ -111,7 +319,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
   }
 
   Future<void> _connect(UsbDevice device) async {
-    await _disconnect();
+    await _disconnect(isManual: false);
     _log("Connecting to ${device.productName}...");
 
     _port = await device.create();
@@ -120,24 +328,50 @@ class _ControlDashboardState extends State<ControlDashboard> {
       return;
     }
 
+    _connectedDevice = device;
+    _lastDeviceIdentity = {
+      'vid': device.vid,
+      'pid': device.pid,
+      'deviceName': device.deviceName,
+    };
+    _saveDevice(device);
+
+    // Auto-dismiss alert if it's showing
+    if (_isAlertShowing) {
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+    }
+
     await _port!.setPortParameters(115200, UsbPort.DATABITS_8, UsbPort.STOPBITS_1, UsbPort.PARITY_NONE);
 
     _subscription = _port!.inputStream!.listen((data) {
       final raw = String.fromCharCodes(data);
       _processIncomingData(raw);
+    }, onError: (error) {
+      _log("Stream Error: $error");
+      _handleUnexpectedDisconnection();
+    }, onDone: () {
+      _log("Stream Closed");
+      _handleUnexpectedDisconnection();
     });
 
     _log("Connected successfully to ${device.productName}");
     if (mounted) setState(() {});
   }
 
-  Future<void> _disconnect() async {
+  Future<void> _disconnect({bool isManual = true}) async {
     if (_port != null) {
       _log("Disconnecting...");
       await _subscription?.cancel();
       _subscription = null;
       _port?.close();
       _port = null;
+      _connectedDevice = null;
+      if (isManual) {
+        _lastDeviceIdentity = null;
+        _clearSavedDevice();
+      }
       _log("Disconnected.");
     }
     if (mounted) setState(() {});
@@ -192,7 +426,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("S&D MediCare Control System"),
+        title: const Text("Water Treadmill Controller"),
         centerTitle: true,
         actions: [
           IconButton(
@@ -200,11 +434,39 @@ class _ControlDashboardState extends State<ControlDashboard> {
             onPressed: () => _showLogTerminal(context),
             tooltip: "View Logs",
           ),
-          IconButton(
-            icon: const Icon(Icons.usb),
-            onPressed: () => _showDeviceSelector(context),
-            color: _port != null ? Colors.greenAccent : Colors.redAccent,
+          SizedBox(
+            width: 56,
+            height: 56,
+            child: AnimatedBuilder(
+              animation: _pulseController,
+              builder: (context, child) {
+                bool isConnected = _port != null;
+                return Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (!isConnected)
+                      Container(
+                        width: 32 + (20 * _pulseController.value),
+                        height: 32 + (20 * _pulseController.value),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.redAccent.withOpacity(1 - _pulseController.value),
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    IconButton(
+                      icon: const Icon(Icons.usb),
+                      onPressed: () => _showDeviceSelector(context),
+                      color: isConnected ? Colors.greenAccent : Colors.redAccent,
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: LayoutBuilder(
@@ -312,139 +574,160 @@ class _ControlDashboardState extends State<ControlDashboard> {
   }
 
   Widget _buildTreadmillPanel(bool isTablet) {
+    bool isConnected = _port != null;
     return _buildMetricCard(
       title: "TREADMILL CONTROL",
       icon: Icons.directions_run,
-      child: Column(
-        children: [
-          LayoutBuilder(builder: (context, constraints) {
-            double metricFontSize = isTablet ? 32 : 24;
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildBigMetric("SPEED", _currentSpeed.toStringAsFixed(2), "km/h", Colors.orange, metricFontSize),
-                _buildBigMetric("TIME", _formatTime(_elapsedSeconds), "MM:SS", Colors.blue, metricFontSize),
-                _buildBigMetric("DISTANCE", _sessionDistance.toStringAsFixed(3), "km", Colors.green, metricFontSize),
-              ],
-            );
-          }),
-          const Divider(height: 32),
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            alignment: WrapAlignment.center,
+      child: IgnorePointer(
+        ignoring: !isConnected,
+        child: Opacity(
+          opacity: isConnected ? 1.0 : 0.4,
+          child: Column(
             children: [
-              _buildControlSlider(
-                label: "TARGET SPEED: ${_targetSpeed.toStringAsFixed(1)} M/h",
-                value: _targetSpeed,
-                min: 0.5,
-                max: 20.0,
-                divisions: 195,
-                onChanged: (v) => setState(() => _targetSpeed = v),
-                onChangeEnd: (v) => _sendCommand("setSpeed:${(v * 100).toInt()}"),
-                isTablet: isTablet,
+              LayoutBuilder(builder: (context, constraints) {
+                double metricFontSize = isTablet ? 32 : 24;
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildBigMetric("SPEED", _currentSpeed.toStringAsFixed(2), "km/h", Colors.orange, metricFontSize),
+                    _buildBigMetric("TIME", _formatTime(_elapsedSeconds), "MM:SS", Colors.blue, metricFontSize),
+                    _buildBigMetric("DISTANCE", _sessionDistance.toStringAsFixed(3), "km", Colors.green, metricFontSize),
+                  ],
+                );
+              }),
+              const Divider(height: 32),
+              Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                alignment: WrapAlignment.center,
+                children: [
+                  _buildControlSlider(
+                    label: "TARGET SPEED: ${_targetSpeed.toInt()} M/h",
+                    value: _targetSpeed,
+                    min: 1,
+                    max: 5000,
+                    divisions: 4999,
+                    onChanged: (v) => setState(() => _targetSpeed = v),
+                    onChangeEnd: (v) => _sendCommand("setSpeed:${v.toInt()}"),
+                    isTablet: isTablet,
+                  ),
+                  _buildControlSlider(
+                    label: "TARGET TIMER: ${_formatTime(_targetSeconds)}",
+                    value: _targetSeconds.toDouble(),
+                    min: 1,
+                    max: 1200,
+                    divisions: 1199,
+                    onChanged: (v) => setState(() => _targetSeconds = v.toInt()),
+                    onChangeEnd: (v) => _sendCommand("setTimer:${v.toInt()}"),
+                    isTablet: isTablet,
+                  ),
+                ],
               ),
-              _buildControlSlider(
-                label: "TARGET TIMER: ${_targetSeconds ~/ 60}m",
-                value: _targetSeconds.toDouble(),
-                min: 60,
-                max: 3600,
-                divisions: 59,
-                onChanged: (v) => setState(() => _targetSeconds = v.toInt()),
-                onChangeEnd: (v) => _sendCommand("setTimer:${v.toInt()}"),
-                isTablet: isTablet,
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _isRunning
+                          ? null
+                          : () {
+                              setState(() {
+                                _isRunning = true;
+                                _elapsedSeconds = _targetSeconds;
+                              });
+                              _startDemoSimulation();
+                              _sendCommand("start");
+                            },
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text("START"),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: !_isRunning
+                          ? null
+                          : () {
+                              setState(() {
+                                _isRunning = false;
+                                _elapsedSeconds = 0;
+                              });
+                              _sendCommand("stop");
+                            },
+                      icon: const Icon(Icons.stop),
+                      label: const Text("STOP"),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _isRunning
-                      ? null
-                      : () {
-                          setState(() => _isRunning = true);
-                          _sendCommand("start");
-                        },
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text("START"),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: !_isRunning
-                      ? null
-                      : () {
-                          setState(() => _isRunning = false);
-                          _sendCommand("stop");
-                        },
-                  icon: const Icon(Icons.stop),
-                  label: const Text("STOP"),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildWaterTankPanel(bool isTablet) {
+    bool isConnected = _port != null;
     double metricFontSize = isTablet ? 32 : 24;
     return _buildMetricCard(
       title: "WATER TANK",
       icon: Icons.water_drop,
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+      child: IgnorePointer(
+        ignoring: !isConnected,
+        child: Opacity(
+          opacity: isConnected ? 1.0 : 0.4,
+          child: Column(
             children: [
-              _buildBigMetric("TEMP", _currentTemp.toStringAsFixed(1), "°C", Colors.redAccent, metricFontSize),
-              _buildBigMetric("LEVEL", _waterLevel.toStringAsFixed(1), "cm", Colors.blueAccent, metricFontSize),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildBigMetric("TEMP", _currentTemp.toStringAsFixed(1), "°C", Colors.redAccent, metricFontSize),
+                  _buildBigMetric("LEVEL", _waterLevel.toStringAsFixed(1), "cm", Colors.blueAccent, metricFontSize),
+                ],
+              ),
+              const Divider(height: 32),
+              _buildControlSlider(
+                label: "TARGET TEMP: ${_targetTemp.toInt()}°C",
+                value: _targetTemp,
+                min: 20,
+                max: 45,
+                divisions: 25,
+                onChanged: (v) => setState(() => _targetTemp = v),
+                onChangeEnd: (v) => _sendCommand("targetTemp:${v.toInt()}"),
+                isTablet: isTablet,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _sendCommand("setWaterTank"),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+                      child: const Text("FILL TANK"),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _sendCommand("drain"),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+                      child: const Text("DRAIN"),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-          const Divider(height: 32),
-          _buildControlSlider(
-            label: "TARGET TEMP: ${_targetTemp.toInt()}°C",
-            value: _targetTemp,
-            min: 20,
-            max: 45,
-            divisions: 25,
-            onChanged: (v) => setState(() => _targetTemp = v),
-            onChangeEnd: (v) => _sendCommand("targetTemp:${v.toInt()}"),
-            isTablet: isTablet,
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _sendCommand("setWaterTank"),
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                  child: const Text("FILL TANK"),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _sendCommand("drain"),
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                  child: const Text("DRAIN"),
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -521,8 +804,11 @@ class _ControlDashboardState extends State<ControlDashboard> {
           onPressed: () {
             setState(() {
               _isRunning = false;
+              _currentSpeed = 0;
+              _elapsedSeconds = 0;
               _faultMessage = "MANUAL EMERGENCY STOP";
             });
+            _demoSimulationTimer?.cancel();
             _sendCommand("Emergency");
           },
           style: FilledButton.styleFrom(
@@ -546,6 +832,10 @@ class _ControlDashboardState extends State<ControlDashboard> {
   void _showDeviceSelector(BuildContext context) async {
     await _refreshDevices();
     if (!context.mounted) return;
+    if (_isDeviceSelectorShowing) return;
+
+    setState(() => _isDeviceSelectorShowing = true);
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -566,9 +856,14 @@ class _ControlDashboardState extends State<ControlDashboard> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("CLOSE")),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CLOSE"),
+          ),
         ],
       ),
-    );
+    ).then((_) {
+      if (mounted) setState(() => _isDeviceSelectorShowing = false);
+    });
   }
 }

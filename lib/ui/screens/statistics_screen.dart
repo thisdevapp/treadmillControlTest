@@ -903,9 +903,11 @@ class SleepTimelinePainter extends CustomPainter {
     final metrics = _ChartMetrics(dayWidth);
     const double bottomPadding = 30.0;
     final double chartHeight = size.height - metrics.topPadding - bottomPadding;
+    final double chartBottom = metrics.topPadding + chartHeight;
 
     final gridPaint = Paint()..color = isDarkMode ? Colors.white12 : Colors.black12..strokeWidth = 1;
 
+    // 배경 그리드 (6시간 간격)
     for (int h = 0; h <= 24; h += 6) {
       double y = metrics.topPadding + (h / 24.0) * chartHeight;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
@@ -917,117 +919,169 @@ class SleepTimelinePainter extends CustomPainter {
       final date = allDates[i];
       final double centerX = (i * dayWidth) + (dayWidth / 2);
 
+      // 상단 날짜 라벨
       final tpLabel = _getTextPainter(DateFormat('E', 'ko_KR').format(date), metrics.labelFontSize, Colors.grey);
       final tpDate = _getTextPainter(DateFormat('dd').format(date), metrics.dateFontSize, isDarkMode ? Colors.white : Colors.black, isBold: true);
       
       _drawTextWithPainter(canvas, tpLabel, Offset(centerX - tpLabel.width / 2, 0));
       _drawTextWithPainter(canvas, tpDate, Offset(centerX - tpDate.width / 2, tpLabel.height - 4.0));
 
-      canvas.drawLine(Offset(centerX, metrics.topPadding), Offset(centerX, metrics.topPadding + chartHeight), gridPaint);
+      // 날짜 구분 수직선
+      canvas.drawLine(Offset(centerX, metrics.topPadding), Offset(centerX, chartBottom), gridPaint);
 
       final dayStartUnix = date.millisecondsSinceEpoch ~/ 1000;
-      final List<math.Rectangle<double>> occupiedAreas = [];
-
+      final dayEndUnix = dayStartUnix + 86400;
+      
+      // 해당 날짜에 포함되거나 걸쳐있는 기록 추출
       final dayRecords = records.where((r) {
-        // r.unixTimestamp는 UTC Epoch
-        // dayStartUnix는 해당 날짜 로컬 00:00의 UTC Epoch
-        // 따라서 단순히 r.unixTimestamp가 [dayStartUnix, dayStartUnix + 86400) 사이에 있는지 확인하면 됩니다.
-        return r.unixTimestamp >= dayStartUnix && r.unixTimestamp < dayStartUnix + 86400;
-      }).toList();
-
-      final sleepPaints = dayRecords.where((r) => r.typeId == sleepType.id).toList();
-      final sleepPaint = Paint()..color = Color(sleepType.colorValue ?? 0xFF4CAF50).withOpacity(0.7)..style = PaintingStyle.fill;
-
-      for (var r in sleepPaints) {
         int? endUnix;
         if (r.value != null) {
-          try { endUnix = json.decode(r.value!)['endUnix'] as int?; } catch (_) { endUnix = int.tryParse(r.value!); }
+          try {
+            final decoded = json.decode(r.value!);
+            endUnix = decoded['endUnix'] as int?;
+          } catch (_) {}
         }
-        final sLocalEnd = endUnix ?? r.unixTimestamp;
-        
-        final drawStart = math.max(r.unixTimestamp, dayStartUnix);
-        final drawEnd = math.min(sLocalEnd, dayStartUnix + 86400);
+        final recordEndUnix = endUnix ?? r.unixTimestamp;
+        return r.unixTimestamp < dayEndUnix && recordEndUnix > dayStartUnix;
+      }).toList();
 
-        if (drawStart < drawEnd) {
-          final double startY = metrics.topPadding + ((drawStart - dayStartUnix) / 86400.0) * chartHeight;
-          final double endY = metrics.topPadding + ((drawEnd - dayStartUnix) / 86400.0) * chartHeight;
-          final double cornerRadius = metrics.barWidth / 2;
+      // [지능형 2단계 렌더링]
+      // 1단계: 모든 막대와 점의 영역을 계산하여 occupiedAreas에 등록
+      final List<math.Rectangle<double>> occupiedAreas = [];
 
-          canvas.drawRRect(RRect.fromRectAndCorners(
-            Rect.fromLTRB(centerX - metrics.barWidth/2, startY, centerX + metrics.barWidth/2, endY), 
-            topLeft: r.unixTimestamp >= dayStartUnix ? Radius.circular(cornerRadius) : Radius.zero, 
-            topRight: r.unixTimestamp >= dayStartUnix ? Radius.circular(cornerRadius) : Radius.zero, 
-            bottomLeft: sLocalEnd <= dayStartUnix + 86400 ? Radius.circular(cornerRadius) : Radius.zero, 
-            bottomRight: sLocalEnd <= dayStartUnix + 86400 ? Radius.circular(cornerRadius) : Radius.zero
-          ), sleepPaint);
+      // 수면 막대 그리기 및 영역 등록
+      final sleepPaint = Paint()
+        ..color = Color(sleepType.colorValue ?? 0xFF4CAF50).withOpacity(0.7)
+        ..style = PaintingStyle.fill;
 
-          if (showAllDetails) {
-            final tpS = _getTextPainter(_formatUnix(r.unixTimestamp, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
-            final tpE = _getTextPainter(_formatUnix(endUnix, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
-            bool barFitsLabels = (endY - startY) > (tpS.width + tpE.width + 20);
+      for (var r in dayRecords) {
+        if (r.typeId == sleepType.id) {
+          int? endUnix;
+          if (r.value != null) {
+            try { endUnix = json.decode(r.value!)['endUnix'] as int?; } catch (_) {}
+          }
+          final sLocalEnd = endUnix ?? r.unixTimestamp;
+          final drawStart = math.max(r.unixTimestamp, dayStartUnix);
+          final drawEnd = math.min(sLocalEnd, dayEndUnix);
 
-            if (r.unixTimestamp >= dayStartUnix) {
-              double proposedY = barFitsLabels ? startY + (metrics.valueFontSize * 0.9) : startY - 5;
-              bool proposedAbove = !barFitsLabels;
-              math.Rectangle rect = math.Rectangle(centerX - tpS.height/2, proposedAbove ? proposedY - tpS.width : proposedY, tpS.height, tpS.width);
-              bool collision = false;
-              for (var area in occupiedAreas) {
-                if (rect.intersects(area)) { collision = true; break; }
-              }
-              if (proposedAbove && (proposedY - tpS.width < metrics.topPadding || collision)) { proposedY = startY + (metrics.valueFontSize * 0.9); proposedAbove = false; }
-              _drawVerticalTextWithPainter(canvas, tpS, Offset(centerX, proposedY), isAbove: proposedAbove);
-              occupiedAreas.add(math.Rectangle(centerX - tpS.height/2, proposedAbove ? proposedY - tpS.width : proposedY, tpS.height, tpS.width));
-            }
+          if (drawStart < drawEnd) {
+            final double startY = metrics.topPadding + ((drawStart - dayStartUnix) / 86400.0) * chartHeight;
+            final double endY = metrics.topPadding + ((drawEnd - dayStartUnix) / 86400.0) * chartHeight;
+            final double cornerRadius = metrics.barWidth / 2;
 
-            if (sLocalEnd <= dayStartUnix + 86400) {
-              double proposedY = barFitsLabels ? endY - (metrics.valueFontSize * 0.9) : endY + 5;
-              bool proposedAbove = barFitsLabels;
-              math.Rectangle rect = math.Rectangle(centerX - tpE.height/2, proposedAbove ? proposedY - tpE.width : proposedY, tpE.height, tpE.width);
-              bool collision = false;
-              for (var area in occupiedAreas) {
-                if (rect.intersects(area)) { collision = true; break; }
-              }
-              if (!proposedAbove && (proposedY + tpE.width > (metrics.topPadding + chartHeight) || collision)) { proposedY = endY - (metrics.valueFontSize * 0.9); proposedAbove = true; }
-              _drawVerticalTextWithPainter(canvas, tpE, Offset(centerX, proposedY), isAbove: proposedAbove);
-              occupiedAreas.add(math.Rectangle(centerX - tpE.height/2, proposedAbove ? proposedY - tpE.width : proposedY, tpE.height, tpE.width));
-            }
+            final rect = Rect.fromLTRB(centerX - metrics.barWidth/2, startY, centerX + metrics.barWidth/2, endY);
+            canvas.drawRRect(RRect.fromRectAndCorners(
+              rect, 
+              topLeft: r.unixTimestamp >= dayStartUnix ? Radius.circular(cornerRadius) : Radius.zero, 
+              topRight: r.unixTimestamp >= dayStartUnix ? Radius.circular(cornerRadius) : Radius.zero, 
+              bottomLeft: sLocalEnd <= dayEndUnix ? Radius.circular(cornerRadius) : Radius.zero, 
+              bottomRight: sLocalEnd <= dayEndUnix ? Radius.circular(cornerRadius) : Radius.zero
+            ), sleepPaint);
+
+            occupiedAreas.add(math.Rectangle(rect.left, rect.top, rect.width, rect.height));
           }
         }
       }
 
-      final customPaints = dayRecords.where((r) => r.typeId != sleepType.id).toList();
+      // 커스텀 이벤트 점 그리기 및 영역 등록
+      for (var r in dayRecords) {
+        if (r.typeId != sleepType.id) {
+          final type = types.firstWhere((t) => t.id == r.typeId, orElse: () => types[0]);
+          final typeColor = Color(type.colorValue ?? 0xFF3F51B5);
+          final medPaint = Paint()..color = typeColor..style = PaintingStyle.fill;
 
-      for (var r in customPaints) {
-        final type = types.firstWhere((t) => t.id == r.typeId, orElse: () => types[0]);
-        final typeColor = Color(type.colorValue ?? 0xFF3F51B5);
-        final medPaint = Paint()..color = typeColor..style = PaintingStyle.fill;
+          final double fractionalDay = (r.unixTimestamp - dayStartUnix) / 86400.0;
+          final double medY = metrics.topPadding + fractionalDay * chartHeight;
 
-        final double fractionalDay = (r.unixTimestamp - dayStartUnix) / 86400.0;
-        final double medY = metrics.topPadding + fractionalDay * chartHeight;
+          canvas.drawCircle(Offset(centerX, medY), metrics.medRadius, medPaint);
+          occupiedAreas.add(math.Rectangle(
+            centerX - metrics.medRadius, 
+            medY - metrics.medRadius, 
+            metrics.medRadius * 2, 
+            metrics.medRadius * 2
+          ));
+        }
+      }
 
-        canvas.drawCircle(Offset(centerX, medY), metrics.medRadius, medPaint);
-        occupiedAreas.add(math.Rectangle(centerX - metrics.medRadius, medY - metrics.medRadius, metrics.medRadius * 2, metrics.medRadius * 2));
+      // 2단계: 텍스트 라벨 배치 (충돌 감지 및 경계 회피)
+      if (showAllDetails) {
+        for (var r in dayRecords) {
+          if (r.typeId == sleepType.id) {
+            int? endUnix;
+            if (r.value != null) {
+              try { endUnix = json.decode(r.value!)['endUnix'] as int?; } catch (_) {}
+            }
+            final sLocalEnd = endUnix ?? r.unixTimestamp;
 
-        if (showAllDetails) {
-          final dt = DateTime.fromMillisecondsSinceEpoch((r.unixTimestamp + r.offsetSeconds) * 1000, isUtc: true);
-          final timeStr = DateFormat('HH:mm').format(dt);
-          
-          String txt = timeStr;
-          if (r.value != null && r.value!.trim().isNotEmpty) {
-            txt = "${type.name}: ${r.value}";
+            // 취침 시간 (막대 상단)
+            if (r.unixTimestamp >= dayStartUnix) {
+              final tp = _getTextPainter(_formatUnix(r.unixTimestamp, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
+              final double startY = metrics.topPadding + ((r.unixTimestamp - dayStartUnix) / 86400.0) * chartHeight;
+              
+              double textY = startY - 5;
+              bool isAbove = true;
+              
+              // 충돌 및 경계 검사
+              var rect = math.Rectangle(centerX - tp.height/2, textY - tp.width, tp.height, tp.width);
+              bool hasCollision = occupiedAreas.any((a) => rect.intersects(a)) || rect.top < metrics.topPadding;
+              
+              if (hasCollision) {
+                textY = startY + 5;
+                isAbove = false;
+                rect = math.Rectangle(centerX - tp.height/2, textY, tp.height, tp.width);
+              }
+              
+              _drawVerticalTextWithPainter(canvas, tp, Offset(centerX, textY), isAbove: isAbove);
+              occupiedAreas.add(rect);
+            }
+
+            // 기상 시간 (막대 하단)
+            if (sLocalEnd <= dayEndUnix) {
+              final tp = _getTextPainter(_formatUnix(sLocalEnd, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
+              final double endY = metrics.topPadding + ((sLocalEnd - dayStartUnix) / 86400.0) * chartHeight;
+              
+              double textY = endY + 5;
+              bool isAbove = false;
+              
+              var rect = math.Rectangle(centerX - tp.height/2, textY, tp.height, tp.width);
+              bool hasCollision = occupiedAreas.any((a) => rect.intersects(a)) || rect.bottom > chartBottom;
+              
+              if (hasCollision) {
+                textY = endY - 5;
+                isAbove = true;
+                rect = math.Rectangle(centerX - tp.height/2, textY - tp.width, tp.height, tp.width);
+              }
+              
+              _drawVerticalTextWithPainter(canvas, tp, Offset(centerX, textY), isAbove: isAbove);
+              occupiedAreas.add(rect);
+            }
+          } else {
+            // 커스텀 이벤트 텍스트
+            final type = types.firstWhere((t) => t.id == r.typeId, orElse: () => types[0]);
+            final typeColor = Color(type.colorValue ?? 0xFF3F51B5);
+            final double medY = metrics.topPadding + ((r.unixTimestamp - dayStartUnix) / 86400.0) * chartHeight;
+            
+            String txt = _formatUnix(r.unixTimestamp, r.offsetSeconds);
+            if (r.value != null && r.value!.trim().isNotEmpty) {
+              txt = "${type.name}: ${r.value}";
+            }
+            final tp = _getTextPainter(txt, metrics.valueFontSize * 0.95, typeColor.withOpacity(0.9), isBold: r.value != null);
+
+            double textY = medY - metrics.medRadius - 5;
+            bool isAbove = true;
+            
+            var rect = math.Rectangle(centerX - tp.height/2, textY - tp.width, tp.height, tp.width);
+            bool hasCollision = occupiedAreas.any((a) => rect.intersects(a)) || rect.top < metrics.topPadding;
+            
+            if (hasCollision) {
+              textY = medY + metrics.medRadius + 5;
+              isAbove = false;
+              rect = math.Rectangle(centerX - tp.height/2, textY, tp.height, tp.width);
+            }
+            
+            _drawVerticalTextWithPainter(canvas, tp, Offset(centerX, textY), isAbove: isAbove);
+            occupiedAreas.add(rect);
           }
-          
-          final tp = _getTextPainter(txt, metrics.valueFontSize * 0.95, typeColor.withOpacity(0.9), isBold: r.value != null);
-          
-          bool isAbove = true;
-          double textY = medY - metrics.medRadius - 5;
-          if (textY - tp.width < metrics.topPadding) { 
-            isAbove = false; 
-            textY = medY + metrics.medRadius + 5; 
-          }
-          
-          _drawVerticalTextWithPainter(canvas, tp, Offset(centerX, textY), isAbove: isAbove);
-          occupiedAreas.add(math.Rectangle(centerX - tp.height/2, isAbove ? textY - tp.width : textY, tp.height, tp.width));
         }
       }
     }
@@ -1056,3 +1110,4 @@ class SleepTimelinePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
+

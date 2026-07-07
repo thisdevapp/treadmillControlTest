@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:drift/drift.dart' show Value;
 import '../../database/database.dart';
 import '../widgets/custom_picker_utils.dart';
 import '../widgets/record_manager.dart';
@@ -126,6 +127,8 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   int _currentPageIndex = 0; 
   bool _isMenuOpen = false;
   bool _showAllDetails = false; 
+
+  final LayerLink _layerLink = LayerLink(); // 버튼과 메뉴를 연결할 레이어 링크
 
   static const double yAxisWidth = 35.0;
 
@@ -290,7 +293,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           if (_isMenuOpen)
             GestureDetector(
               onTap: () => setState(() => _isMenuOpen = false),
-              child: Container(color: Colors.black.withOpacity(0.1)),
+              child: Container(color: Colors.black.withValues(alpha: 0.1)),
             ),
           _buildFabMenu(),
         ],
@@ -341,11 +344,16 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 constraints: const BoxConstraints(),
                 padding: const EdgeInsets.all(4),
               ),
-              IconButton.filledTonal(
-                onPressed: () => setState(() => _isMenuOpen = !_isMenuOpen),
-                icon: Icon(_isMenuOpen ? Icons.close : Icons.add, size: 18),
-                constraints: const BoxConstraints(),
-                padding: const EdgeInsets.all(4),
+              CompositedTransformTarget(
+                link: _layerLink,
+                child: IconButton.filledTonal(
+                  onPressed: () {
+                    setState(() => _isMenuOpen = !_isMenuOpen);
+                  },
+                  icon: Icon(_isMenuOpen ? Icons.close : Icons.add, size: 18),
+                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.all(4),
+                ),
               ),
             ],
           ),
@@ -449,38 +457,44 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
 
   Widget _buildFabMenu() {
     if (!_isMenuOpen) return const SizedBox.shrink();
-    return Positioned(
-      top: 80, 
-      right: 16, 
-      child: Material(
-        elevation: 8, 
-        borderRadius: BorderRadius.circular(12), 
-        child: FutureBuilder<List<CustomDataType>>(
-          future: widget.database.getCustomDataTypes(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) return const SizedBox.shrink();
-            final types = snapshot.data!;
-            final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
-            final otherTypes = types.where((t) => t.id != sleepType.id).toList();
 
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _menuItem(Icons.bedtime, "수면 기록 추가", () => _pickSleepPeriod(sleepType.id)),
-                if (otherTypes.isNotEmpty) ...[
-                  const Divider(height: 1),
-                  ...otherTypes.map((type) {
-                    return _menuItem(
-                      _getIconData(type.iconName),
-                      "${type.name} 추가",
-                      () => _pickCustomEventTime(type),
-                    );
-                  })
-                ]
-              ],
-            );
-          },
+    return CompositedTransformFollower(
+      link: _layerLink,
+      showWhenUnlinked: false,
+      offset: const Offset(-140, 36), // 버튼 위치 기준 (좌측으로 140px 이동, 아래로 36px 이동)
+      child: Material(
+        elevation: 8,
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 180,
+          child: FutureBuilder<List<CustomDataType>>(
+            future: widget.database.getCustomDataTypes(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) return const SizedBox.shrink();
+              final types = snapshot.data!;
+              final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
+              final otherTypes = types.where((t) => t.id != sleepType.id).toList();
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _menuItem(Icons.bedtime, "수면 기록 추가", () => _pickSleepPeriod(sleepType.id)),
+                  if (otherTypes.isNotEmpty) ...[
+                    const Divider(height: 1),
+                    ...otherTypes.map((type) {
+                      return _menuItem(
+                        _getIconData(type.iconName),
+                        "${type.name} 추가",
+                        () => _pickCustomEventTime(type),
+                      );
+                    })
+                  ],
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -500,9 +514,10 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(i, size: 18, color: Colors.indigo), 
-          const SizedBox(width: 10), 
-          Text(l, style: const TextStyle(fontSize: 13)),
+          // 박스나 배경 없이 아이콘만 렌더링
+          Icon(i, size: 24, color: Colors.indigo), 
+          const SizedBox(width: 12), 
+          Text(l, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
         ],
       ),
     ),
@@ -951,7 +966,7 @@ class SleepTimelinePainter extends CustomPainter {
 
       // 수면 막대 그리기 및 영역 등록
       final sleepPaint = Paint()
-        ..color = Color(sleepType.colorValue ?? 0xFF4CAF50).withOpacity(0.7)
+        ..color = Color(sleepType.colorValue ?? 0xFF4CAF50).withValues(alpha: 0.7)
         ..style = PaintingStyle.fill;
 
       for (var r in dayRecords) {
@@ -1065,7 +1080,7 @@ class SleepTimelinePainter extends CustomPainter {
             if (r.value != null && r.value!.trim().isNotEmpty) {
               txt = "${type.name}: ${r.value}";
             }
-            final tp = _getTextPainter(txt, metrics.valueFontSize * 0.95, typeColor.withOpacity(0.9), isBold: r.value != null);
+            final tp = _getTextPainter(txt, metrics.valueFontSize * 0.95, typeColor.withValues(alpha: 0.9), isBold: r.value != null);
 
             double textY = medY - metrics.medRadius - 5;
             bool isAbove = true;

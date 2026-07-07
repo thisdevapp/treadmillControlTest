@@ -6,6 +6,12 @@ import 'custom_picker_utils.dart';
 
 class RecordManager {
   static IconData getIconData(String? name) {
+    if (name != null) {
+      final codePoint = int.tryParse(name);
+      if (codePoint != null) {
+        return IconData(codePoint, fontFamily: 'MaterialIcons');
+      }
+    }
     switch (name) {
       case 'hotel': return Icons.hotel_rounded;
       case 'medication': return Icons.medication_rounded;
@@ -23,7 +29,7 @@ class RecordManager {
   }
 
   static void showRecordToast(BuildContext context, CustomDataType type, String message) {
-    final color = Color(type.colorValue ?? Colors.indigo.value);
+    final color = Color(type.colorValue ?? Colors.indigo.toARGB32());
     final onColor = Theme.of(context).scaffoldBackgroundColor;
 
     ScaffoldMessenger.of(context).clearSnackBars();

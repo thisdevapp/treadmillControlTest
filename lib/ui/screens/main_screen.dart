@@ -1,12 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:drift/drift.dart' show Value;
 import '../../database/database.dart';
-import '../widgets/custom_picker_utils.dart';
 import '../widgets/record_manager.dart';
+import '../widgets/record_type_manager.dart';
 import 'statistics_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -52,11 +49,6 @@ class _MainScreenState extends State<MainScreen> {
     _loadSettings();
   }
 
-  Future<void> _checkDataIntegrity() async {
-    final columns = MediaQuery.of(context).size.width > 600 ? 6 : 4;
-    await widget.database.fixDataIntegrity(columns: columns);
-  }
-
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -93,7 +85,11 @@ class _MainScreenState extends State<MainScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded),
-            onPressed: () => _showAddOrEditTypeDialog(onSaved: () {}),
+            onPressed: () => RecordTypeManager.showAddOrEditTypeDialog(
+              context: context, 
+              database: widget.database, 
+              onSaved: () {}
+            ),
           ),
         ] : null,
       ),
@@ -118,7 +114,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // ==========================================
-  // [1] 기록 대시보드 (날짜 제거, 프리셋 강화)
+  // [1] 기록 대시보드
   // ==========================================
   Widget _buildDashboardView() {
     final Size screenSize = MediaQuery.of(context).size;
@@ -139,9 +135,7 @@ class _MainScreenState extends State<MainScreen> {
         }
         
         final types = snapshot.data!;
-        debugPrint("📊 대시보드 위젯 개수: ${types.length}");
         
-        // 데이터가 전혀 없는 경우 프리셋 버튼 생성 제안
         if (types.isEmpty) {
           return Center(child: SingleChildScrollView(
             child: Column(
@@ -165,20 +159,13 @@ class _MainScreenState extends State<MainScreen> {
         }
 
         return LayoutBuilder(builder: (context, constraints) {
-          debugPrint("📏 LayoutBuilder 제약 조건: ${constraints.maxWidth} x ${constraints.maxHeight}");
-          
-          // 제약 조건이 너무 작으면 렌더링 스킵
           if (constraints.maxWidth < 100 || constraints.maxHeight < 100) {
             return const Center(child: Text("화면 크기 대기 중..."));
           }
 
-          // 세로 방향으로 스크롤 없이 보이기 위해 타겟 행(Row) 설정
-          final double horizontalPadding = 48; // (24 * 2)
+          final double horizontalPadding = 48;
           final double verticalPadding = 48;
-          
           final double cellWidth = (constraints.maxWidth - horizontalPadding) / columns;
-          
-          // 한 화면에 약 6행이 딱 들어오도록 계산 (오버플로우 방지)
           final double cellHeight = (constraints.maxHeight - verticalPadding) / 6;
 
           return GestureDetector(
@@ -195,10 +182,8 @@ class _MainScreenState extends State<MainScreen> {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // 가이드라인이 부모 높이를 넘지 않도록 6행으로 제한
                   if (_isEditMode) _buildGridGuide(constraints.maxWidth - horizontalPadding, cellHeight, 6, columns),
                   
-                  // 드래그 중인 고스트(가이드) 표시
                   if (_activeId != null) Positioned(
                     left: _ghostX * cellWidth,
                     top: _ghostY * cellHeight,
@@ -208,9 +193,9 @@ class _MainScreenState extends State<MainScreen> {
                       padding: const EdgeInsets.all(4.0),
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.indigo.withOpacity(0.1),
+                          color: Colors.indigo.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.indigo.withOpacity(0.3), width: 2, strokeAlign: BorderSide.strokeAlignOutside),
+                          border: Border.all(color: Colors.indigo.withValues(alpha: 0.3), width: 2, strokeAlign: BorderSide.strokeAlignOutside),
                         ),
                       ),
                     ),
@@ -226,14 +211,6 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // 기본 프리셋 생성 (수면 1x1 버튼을 왼쪽 상단 0,0에 배치)
-  Future<void> _createDefaultPreset() async {
-    await widget.database.addCustomDataType(
-      name: '수면', iconName: 'hotel', colorValue: 0xFF4CAF50, isPreset: true,
-      x: 0, y: 0, w: 1, h: 1,
-    );
-  }
-
   Widget _buildPositionedWidget(CustomDataType type, double cellW, double cellH) {
     final bool isActive = _activeId == type.id;
     final bool isMoving = isActive && !_isResizing;
@@ -242,10 +219,8 @@ class _MainScreenState extends State<MainScreen> {
     return AnimatedPositioned(
       duration: isActive ? Duration.zero : const Duration(milliseconds: 300),
       curve: Curves.easeOutQuart,
-      // 이동 중일 때만 드래그 좌표 사용, 리사이즈 중에는 위치 고정
       left: isMoving ? _dragX : type.gridX * cellW,
       top: isMoving ? _dragY : type.gridY * cellH,
-      // 리사이즈 중에는 고스트 크기를 즉시 반영하여 실시간으로 변화하게 함
       width: isResizing ? _ghostW * cellW : type.gridWidth * cellW,
       height: isResizing ? _ghostH * cellH : type.gridHeight * cellH,
       child: Padding(
@@ -257,15 +232,13 @@ class _MainScreenState extends State<MainScreen> {
 
   Widget _buildWidgetCard(CustomDataType type, double cellW, double cellH) {
     final bool isActive = _activeId == type.id;
-    final bool isMoving = isActive && !_isResizing;
     final bool isResizing = isActive && _isResizing;
 
-    // 현재 상호작용 중인 크기 반영 (리사이즈 중이면 고스트 크기 사용)
     final int currentW = isResizing ? _ghostW : type.gridWidth;
     final int currentH = isResizing ? _ghostH : type.gridHeight;
     final bool isSmall = currentW == 1 && currentH == 1;
     
-    final Color color = Color(type.colorValue ?? Colors.indigo.value);
+    final Color color = Color(type.colorValue ?? Colors.indigo.toARGB32());
     final int maxCol = MediaQuery.of(context).size.width > 600 ? 6 : 4;
 
     final Color themeBgColor = Theme.of(context).scaffoldBackgroundColor;
@@ -278,11 +251,7 @@ class _MainScreenState extends State<MainScreen> {
         final double cardW = cellW * type.gridWidth;
         final double cardH = cellH * type.gridHeight;
         
-        print("🚩 [PAN START] ID: ${type.id}, Pos: (${lx.toStringAsFixed(1)}, ${ly.toStringAsFixed(1)}), CardSize: (${cardW.toStringAsFixed(1)}, ${cardH.toStringAsFixed(1)})");
-
-        // 리사이즈 핸들 영역(우측 하단 50x50으로 확대) 인지 확인
         if (lx > cardW - 50 && ly > cardH - 50) {
-          print("📐 [RESIZE MODE START] ID: ${type.id}");
           setState(() {
             _activeId = type.id;
             _isResizing = true;
@@ -296,7 +265,6 @@ class _MainScreenState extends State<MainScreen> {
             _ghostH = type.gridHeight;
           });
         } else {
-          print("🚚 [MOVE MODE START] ID: ${type.id}");
           setState(() {
             _activeId = type.id;
             _isResizing = false;
@@ -313,22 +281,17 @@ class _MainScreenState extends State<MainScreen> {
         if (_activeId != type.id) return;
 
         if (_isResizing) {
-          // 리사이즈 로직
           double deltaX = details.globalPosition.dx - _startGlobalX;
           double deltaY = details.globalPosition.dy - _startGlobalY;
-          
           int newW = (_startGridW + deltaX / cellW).round().clamp(1, maxCol - type.gridX);
-          int newH = (_startGridH + deltaY / cellH).round().clamp(1, 6); // 화면 내로 제한
-          
+          int newH = (_startGridH + deltaY / cellH).round().clamp(1, 6);
           if (newW != _ghostW || newH != _ghostH) {
-            print("📐 [RESIZE UPDATE] $newW x $newH");
             setState(() {
               _ghostW = newW;
               _ghostH = newH;
             });
           }
         } else {
-          // 이동 로직
           setState(() {
             _dragX += details.delta.dx;
             _dragY += details.delta.dy;
@@ -339,20 +302,15 @@ class _MainScreenState extends State<MainScreen> {
       } : null,
       onPanEnd: _isEditMode ? (details) async {
         if (_activeId != type.id) return;
-
         final int finalId = type.id;
         final int finalX = _isResizing ? type.gridX : _ghostX;
         final int finalY = _isResizing ? type.gridY : _ghostY;
         final int finalW = _isResizing ? _ghostW : type.gridWidth;
         final int finalH = _isResizing ? _ghostH : type.gridHeight;
-
-        print("🏁 [PAN END] ID: $finalId, Mode: ${_isResizing ? 'RESIZE' : 'MOVE'}, Result: ($finalX, $finalY) ${finalW}x$finalH");
-
         setState(() {
           _activeId = null;
           _isResizing = false;
         });
-
         await widget.database.updateCustomDataTypeLayout(finalId, finalX, finalY, finalW, finalH);
         await widget.database.fixDataIntegrity(columns: maxCol);
       } : null,
@@ -367,37 +325,39 @@ class _MainScreenState extends State<MainScreen> {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: color, // 배경색을 데이터 고유 색상으로 변경
+          color: color.withValues(alpha: 0.2), // 배경색 투명도를 20%로 설정
           borderRadius: BorderRadius.circular(isSmall ? 18 : 24),
           boxShadow: [
             BoxShadow(
-              color: color.withOpacity(isActive ? 0.5 : 0.2), 
+              color: color.withValues(alpha: 0.1), // 그림자도 더 은은하게 조정
               blurRadius: isActive ? 20 : 10, 
               offset: isActive ? const Offset(0, 8) : const Offset(0, 4)
             )
           ],
           // 편집 모드 시 테마에 따라 대비되는 테두리 표시
-          border: _isEditMode ? Border.all(color: themeBgColor.withOpacity(isActive ? 1.0 : 0.3), width: isActive ? 3 : 1.5) : null,
+          border: _isEditMode ? Border.all(color: color.withValues(alpha: isActive ? 1.0 : 0.3), width: isActive ? 3 : 1.5) : null,
         ),
         child: Stack(
           children: [
-            // 아이콘과 텍스트를 현재 테마의 배경색(scaffoldBackgroundColor)으로 표시
-            _buildWidgetContent(type, currentW, currentH, themeBgColor),
+            // 아이콘과 텍스트 컬러를 해당 데이터 컬러(color)로 적용
+            _buildWidgetContent(type, currentW, currentH, color),
             if (_isEditMode) ...[
-              // 이동 핸들 아이콘 (중앙 상단)
               Positioned(
                 top: 4, right: 0, left: 0,
-                child: Icon(Icons.drag_handle_rounded, size: 14, color: themeBgColor.withOpacity(0.5))
+                child: Icon(Icons.drag_handle_rounded, size: 14, color: themeBgColor.withValues(alpha: 0.5))
               ),
-              // 삭제 버튼 (좌측 상단)
               Positioned(
                 top: -2, left: -2,
                 child: IconButton(
                   icon: Icon(Icons.remove_circle, size: 18, color: themeBgColor),
-                  onPressed: () => _confirmDeleteType(type, () {}),
+                  onPressed: () => RecordTypeManager.confirmDeleteType(
+                    context: context, 
+                    database: widget.database, 
+                    type: type, 
+                    onDeleteDone: () {}
+                  ),
                 ),
               ),
-              // 리사이즈 핸들 (우측 하단)
               Positioned(
                 bottom: 0, right: 0,
                 child: Container(
@@ -405,7 +365,7 @@ class _MainScreenState extends State<MainScreen> {
                   alignment: Alignment.bottomRight,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: isResizing ? Colors.red.withOpacity(0.2) : themeBgColor.withOpacity(0.1),
+                    color: isResizing ? Colors.red.withValues(alpha: 0.2) : themeBgColor.withValues(alpha: 0.1),
                     borderRadius: const BorderRadius.only(bottomRight: Radius.circular(18)),
                   ),
                   child: Icon(
@@ -422,37 +382,33 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildWidgetContent(CustomDataType type, int w, int h, Color foregroundColor) {
+  Widget _buildWidgetContent(CustomDataType type, int w, int h, Color iconColor) {
     final bool isHorizontal = w > h;
     final IconData iconData = _getIconData(type.iconName);
+    final Brightness brightness = Theme.of(context).brightness;
+    final Color textColor = brightness == Brightness.dark ? Colors.white : Colors.black;
 
     if (isHorizontal) {
-      // [가로형 레이아웃] 텍스트 길이에 반응하는 유동적 중앙 정렬
       return LayoutBuilder(builder: (context, constraints) {
-        final double minSide = constraints.maxWidth < constraints.maxHeight
-            ? constraints.maxWidth
-            : constraints.maxHeight;
-
+        final double minSide = constraints.maxWidth < constraints.maxHeight ? constraints.maxWidth : constraints.maxHeight;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12.0),
-          alignment: Alignment.center, // 전체 그룹을 중앙에 배치
+          alignment: Alignment.center,
           child: Row(
-            mainAxisSize: MainAxisSize.min, // 내용물 크기만큼만 Row 크기 설정
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // 아이콘: 위젯 높이에 비례한 적절한 크기 유지
-              Icon(iconData, color: foregroundColor, size: minSide * 0.5),
+              Icon(iconData, color: iconColor, size: minSide * 0.5),
               const SizedBox(width: 8),
-              // 텍스트: Flexible을 사용하여 길이에 따라 유동적으로 변화
               Flexible(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
                     type.name,
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
-                      color: foregroundColor,
+                      fontSize: 18, 
+                      fontWeight: FontWeight.w900, 
+                      letterSpacing: -0.5, 
+                      color: textColor, // 모드에 따라 검정/흰색 적용
                     ),
                   ),
                 ),
@@ -462,39 +418,29 @@ class _MainScreenState extends State<MainScreen> {
         );
       });
     } else {
-      // [세로형/정사각 레이아웃] 아이콘 중앙, 텍스트 하단
       return LayoutBuilder(builder: (context, constraints) {
-        final double minSide = constraints.maxWidth < constraints.maxHeight
-            ? constraints.maxWidth
-            : constraints.maxHeight;
+        final double minSide = constraints.maxWidth < constraints.maxHeight ? constraints.maxWidth : constraints.maxHeight;
         final bool isSmall = w == 1 && h == 1;
-
         return Container(
           padding: const EdgeInsets.all(8.0),
           child: Column(
             children: [
-              // 아이콘 (상단/중앙)
+              Expanded(flex: 5, child: Center(child: Icon(iconData, color: iconColor, size: minSide * (isSmall ? 0.45 : 0.55)))),
               Expanded(
-                flex: 5,
-                child: Center(
-                  child: Icon(iconData,
-                      color: foregroundColor, size: minSide * (isSmall ? 0.45 : 0.55)),
-                ),
-              ),
-              // 텍스트 (하단 고정)
-              Expanded(
-                flex: 2,
+                flex: 2, 
                 child: Center(
                   child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.topCenter,
-                    child: Text(type.name,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
-                          color: foregroundColor,
-                        )),
+                    fit: BoxFit.scaleDown, 
+                    alignment: Alignment.topCenter, 
+                    child: Text(
+                      type.name, 
+                      style: TextStyle(
+                        fontSize: 16, 
+                        fontWeight: FontWeight.w900, 
+                        letterSpacing: -0.5, 
+                        color: textColor, // 모드에 따라 검정/흰색 적용
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -508,7 +454,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildGridGuide(double width, double cellH, int rows, int columns) {
     return Column(children: List.generate(rows, (y) => Row(children: List.generate(columns, (x) => Container(
       width: width / columns, height: cellH,
-      decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.05))),
+      decoration: BoxDecoration(border: Border.all(color: Colors.grey.withValues(alpha: 0.05))),
     )))));
   }
 
@@ -533,7 +479,7 @@ class _MainScreenState extends State<MainScreen> {
   // [3] 비즈니스 로직
   // ==========================================
   void _onWidgetTap(CustomDataType type) {
-    HapticFeedback.mediumImpact(); // 햅틱 반응 추가
+    HapticFeedback.mediumImpact();
     if (type.name == '수면') {
       RecordManager.showSleepLogDialog(
         context: context,
@@ -555,38 +501,9 @@ class _MainScreenState extends State<MainScreen> {
     RecordManager.showRecordToast(context, type, message);
   }
 
-  void _showLayoutEditDialog(CustomDataType type) {
-    int x = type.gridX; int y = type.gridY; int w = type.gridWidth; int h = type.gridHeight;
-    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(
-      title: Text("${type.name} 위젯 설정"),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text("위치 (X, Y 좌표)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-          _counterField("X", x, (v) => setDlgState(() => x = v.clamp(0, 3))),
-          _counterField("Y", y, (v) => setDlgState(() => y = v.clamp(0, 20))),
-        ]),
-        const SizedBox(height: 16),
-        const Text("크기 (가로, 세로 칸 수)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-          _counterField("가로", w, (v) => setDlgState(() => w = v.clamp(1, 4))),
-          _counterField("세로", h, (v) => setDlgState(() => h = v.clamp(1, 4))),
-        ]),
-      ]),
-      actions: [
-        TextButton(onPressed: () => _confirmDeleteType(type, () => Navigator.pop(ctx)), child: const Text("삭제", style: TextStyle(color: Colors.red))),
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-        FilledButton(onPressed: () async {
-          await widget.database.updateCustomDataTypeLayout(type.id, x, y, w, h);
-          if (ctx.mounted) Navigator.pop(ctx);
-        }, child: const Text("저장")),
-      ],
-    )));
-  }
-
   void _showWidgetMenu(CustomDataType type) {
-    final color = Color(type.colorValue ?? Colors.indigo.value);
+    final color = Color(type.colorValue ?? Colors.indigo.toARGB32());
     final onColor = Theme.of(context).scaffoldBackgroundColor;
-
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -653,7 +570,12 @@ class _MainScreenState extends State<MainScreen> {
               icon: Icons.settings_suggest_rounded,
               label: "기록 수정",
               onColor: onColor,
-              onTap: () => _showAddOrEditTypeDialog(type: type, onSaved: () {}),
+              onTap: () => RecordTypeManager.showAddOrEditTypeDialog(
+                context: context, 
+                database: widget.database, 
+                type: type, 
+                onSaved: () {}
+              ),
             ),
           ],
         ),
@@ -681,60 +603,6 @@ class _MainScreenState extends State<MainScreen> {
       IconButton(icon: const Icon(Icons.add_circle_outline, size: 20), onPressed: () => onChg(val + 1)),
     ])
   ]);
-
-  void _showAddOrEditTypeDialog({CustomDataType? type, required VoidCallback onSaved}) {
-    final isEdit = type != null;
-    final nameController = TextEditingController(text: type?.name ?? "");
-    String selectedIcon = type?.iconName ?? "medication";
-    int selectedColor = type?.colorValue ?? 0xFF3F51B5;
-    
-    final List<Map<String, dynamic>> icons = [{'name': 'medication', 'icon': Icons.medication_rounded}, {'name': 'coffee', 'icon': Icons.local_cafe_rounded}, {'name': 'smoke', 'icon': Icons.smoking_rooms_rounded}, {'name': 'sports', 'icon': Icons.directions_run_rounded}, {'name': 'beer', 'icon': Icons.local_bar_rounded}, {'name': 'star', 'icon': Icons.star_rounded}, {'name': 'favorite', 'icon': Icons.favorite_rounded}, {'name': 'mood', 'icon': Icons.mood_rounded}, {'name': 'water', 'icon': Icons.water_drop_rounded}, {'name': 'food', 'icon': Icons.restaurant_rounded}];
-    final List<int> colors = [0xFF3F51B5, 0xFF4CAF50, 0xFFFF9800, 0xFFE91E63, 0xFF009688, 0xFF9C27B0, 0xFF2196F3, 0xFF795548];
-    
-    showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) => AlertDialog(
-      title: Text(isEdit ? "기록 버튼 수정" : "새 기록 버튼 추가"),
-      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: nameController, decoration: const InputDecoration(labelText: "이름", border: OutlineInputBorder())),
-        const SizedBox(height: 16),
-        const Text("아이콘 선택", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Wrap(spacing: 8, runSpacing: 8, children: icons.map((i) => ChoiceChip(avatar: Icon(i['icon'], size: 16), label: const Text(""), selected: selectedIcon == i['name'], onSelected: (s) => setDlgState(() => selectedIcon = i['name']))).toList()),
-        const SizedBox(height: 16),
-        const Text("테마 색상", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Wrap(spacing: 12, runSpacing: 12, children: colors.map((c) => GestureDetector(onTap: () => setDlgState(() => selectedColor = c), child: CircleAvatar(backgroundColor: Color(c), radius: 14, child: selectedColor == c ? const Icon(Icons.check, size: 14, color: Colors.white) : null))).toList()),
-      ])),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-        FilledButton(onPressed: () async {
-          if (nameController.text.isEmpty) return;
-          if (isEdit) {
-            await widget.database.updateCustomDataTypeInfo(type.id, nameController.text, selectedIcon, selectedColor);
-          } else {
-            await widget.database.addCustomDataType(name: nameController.text, iconName: selectedIcon, colorValue: selectedColor, x: 0, y: 0, w: 1, h: 1);
-            await widget.database.fixDataIntegrity(columns: MediaQuery.of(context).size.width > 600 ? 6 : 4);
-          }
-          onSaved();
-          if (ctx.mounted) Navigator.pop(ctx);
-        }, child: Text(isEdit ? "수정 완료" : "생성")),
-      ],
-    )));
-  }
-
-  void _confirmDeleteType(CustomDataType type, VoidCallback onDeleteDone) {
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Text("버튼 삭제"),
-      content: const Text("이 버튼과 관련된 모든 기록이 삭제됩니다. 계속하시겠습니까?"),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-        TextButton(onPressed: () async {
-          await widget.database.deleteCustomDataType(type.id);
-          onDeleteDone();
-          if (ctx.mounted) Navigator.pop(ctx);
-        }, child: const Text("삭제", style: TextStyle(color: Colors.red))),
-      ],
-    ));
-  }
 
   void _confirmResetAllData() {
     showDialog(context: context, builder: (ctx) => AlertDialog(

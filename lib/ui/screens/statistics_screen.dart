@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rxdart/rxdart.dart';
-import 'package:drift/drift.dart' show Value;
 import '../../database/database.dart';
 import '../widgets/custom_picker_utils.dart';
 import '../widgets/record_manager.dart';
+import '../widgets/record_type_manager.dart';
 
 /// 모든 차트 요소의 크기와 패딩을 중앙 관리하는 클래스
 class _ChartMetrics {
@@ -110,11 +110,15 @@ class _HitInfo {
 class StatisticsScreen extends StatefulWidget {
   final AppDatabase database;
   final double longPressSeconds;
+  final bool showAllDetails;
+  final Function(bool) onShowAllDetailsChanged;
 
   const StatisticsScreen({
     super.key, 
     required this.database, 
     required this.longPressSeconds,
+    required this.showAllDetails,
+    required this.onShowAllDetailsChanged,
   });
 
   @override
@@ -126,7 +130,6 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   late PageController _pageController;
   int _currentPageIndex = 0; 
   bool _isMenuOpen = false;
-  bool _showAllDetails = false; 
 
   final LayerLink _layerLink = LayerLink(); // 버튼과 메뉴를 연결할 레이어 링크
 
@@ -273,7 +276,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                                 database: widget.database,
                                 pageIndex: index,
                                 periodDays: _selectedPeriodDays,
-                                showAllDetails: _showAllDetails,
+                                showAllDetails: widget.showAllDetails,
                                 longPressSeconds: widget.longPressSeconds,
                                 onExecuteLongPress: _executeLongPress,
                                 yAxisWidth: 0, 
@@ -335,10 +338,10 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 padding: const EdgeInsets.all(4),
               ),
               IconButton(
-                onPressed: () => setState(() => _showAllDetails = !_showAllDetails),
+                onPressed: () => widget.onShowAllDetailsChanged(!widget.showAllDetails),
                 icon: Icon(
-                  _showAllDetails ? Icons.segment : Icons.segment_outlined,
-                  color: _showAllDetails ? Colors.indigo : null,
+                  widget.showAllDetails ? Icons.segment : Icons.segment_outlined,
+                  color: widget.showAllDetails ? Colors.indigo : null,
                   size: 18,
                 ),
                 constraints: const BoxConstraints(),
@@ -381,7 +384,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             key: ValueKey<String>("${_currentPageIndex}_$_selectedPeriodDays"), 
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1), 
             decoration: BoxDecoration(
-              color: Colors.indigo.withOpacity(0.08),
+              color: Colors.indigo.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(15),
             ),
             child: Row(
@@ -443,7 +446,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 Container(
                   width: 9, 
                   height: 9, 
-                  decoration: BoxDecoration(color: color.withOpacity(0.8), shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: color.withValues(alpha: 0.8), shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 4),
                 Text(t.name, style: const TextStyle(fontSize: 10, color: Colors.grey)),
@@ -466,7 +469,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         elevation: 8,
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
-        child: Container(
+        child: SizedBox(
           width: 180,
           child: FutureBuilder<List<CustomDataType>>(
             future: widget.database.getCustomDataTypes(),
@@ -1028,10 +1031,12 @@ class SleepTimelinePainter extends CustomPainter {
             }
             final sLocalEnd = endUnix ?? r.unixTimestamp;
 
+            final double startY = metrics.topPadding + ((r.unixTimestamp - dayStartUnix) / 86400.0) * chartHeight;
+            final double endY = metrics.topPadding + ((sLocalEnd - dayStartUnix) / 86400.0) * chartHeight;
+
             // 취침 시간 (막대 상단)
             if (r.unixTimestamp >= dayStartUnix) {
               final tp = _getTextPainter(_formatUnix(r.unixTimestamp, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
-              final double startY = metrics.topPadding + ((r.unixTimestamp - dayStartUnix) / 86400.0) * chartHeight;
               
               double textY = startY - 5;
               bool isAbove = true;
@@ -1053,7 +1058,6 @@ class SleepTimelinePainter extends CustomPainter {
             // 기상 시간 (막대 하단)
             if (sLocalEnd <= dayEndUnix) {
               final tp = _getTextPainter(_formatUnix(sLocalEnd, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
-              final double endY = metrics.topPadding + ((sLocalEnd - dayStartUnix) / 86400.0) * chartHeight;
               
               double textY = endY + 5;
               bool isAbove = false;
@@ -1069,6 +1073,27 @@ class SleepTimelinePainter extends CustomPainter {
               
               _drawVerticalTextWithPainter(canvas, tp, Offset(centerX, textY), isAbove: isAbove);
               occupiedAreas.add(rect);
+            }
+
+            // [추가] 수면 막대 내부 중앙에 총 수면시간(HH:MM) 표시
+            final durationSeconds = sLocalEnd - r.unixTimestamp;
+            if (durationSeconds > 1800) { // 30분 이상인 경우에만 시도
+              final hours = durationSeconds ~/ 3600;
+              final minutes = (durationSeconds % 3600) ~/ 60;
+              final durationStr = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}";
+              
+              final tpDur = _getTextPainter(
+                durationStr, 
+                (metrics.valueFontSize * 0.85).clamp(8, 20), 
+                isDarkMode ? Colors.black : Colors.white, // 바탕색과 대비되도록 (라이트:흰색, 다크:검정)
+                isBold: true
+              );
+
+              final double barCenterY = startY + (endY - startY) / 2;
+              // 막대 내부에 수직으로 배치할 공간이 있는지 확인
+              if (endY - startY > tpDur.width + 10) {
+                _drawVerticalTextWithPainter(canvas, tpDur, Offset(centerX, barCenterY + tpDur.width/2), isAbove: true);
+              }
             }
           } else {
             // 커스텀 이벤트 텍스트
@@ -1125,4 +1150,3 @@ class SleepTimelinePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
-

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../database/database.dart';
+import '../../core/constants/ui_styles.dart'; // 스타일 모듈 추가
 import 'custom_picker_utils.dart';
 
 class RecordManager {
@@ -29,28 +30,36 @@ class RecordManager {
   }
 
   static void showRecordToast(BuildContext context, CustomDataType type, String message) {
-    final color = Color(type.colorValue ?? Colors.indigo.toARGB32());
-    final onColor = Theme.of(context).scaffoldBackgroundColor;
+    final themeColor = Color(type.colorValue ?? Colors.indigo.toARGB32());
+    final bgColor = UIStyles.getToastBgColor(themeColor);
+    final iconColor = themeColor; // 아이콘은 이전처럼 포인트 컬러 유지
+    final textColor = UIStyles.getToastTextColor(context); // 텍스트 컬러를 버튼과 일치 (흑/백)
 
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
-            Icon(getIconData(type.iconName), color: onColor, size: 20),
+            Icon(getIconData(type.iconName), color: iconColor, size: 20),
             const SizedBox(width: 12),
-            Text(
-              message,
-              style: TextStyle(color: onColor, fontWeight: FontWeight.bold, fontSize: 14),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 14),
+              ),
             ),
           ],
         ),
-        backgroundColor: color,
+        backgroundColor: bgColor,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          // 아웃라인 제거 (스타일 일관성 유지)
+          side: BorderSide.none,
+        ),
         duration: const Duration(seconds: 2),
-        elevation: 4,
+        elevation: 0,
       ),
     );
   }
@@ -161,7 +170,12 @@ class RecordManager {
                     value: memoValue,
                   );
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
+                
+                // 실제 저장이 성공한 시점에 토스트 표시
+                if (ctx.mounted) {
+                  onShowToast?.call(type, existingRecordId != null ? "${type.name} 기록이 수정되었습니다." : "${type.name} 과거 기록이 추가되었습니다.");
+                  Navigator.pop(ctx);
+                }
               },
               child: Text(existingRecordId != null ? "수정하기" : "저장하기", 
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -170,10 +184,6 @@ class RecordManager {
         ),
       ),
     );
-
-    if (context.mounted) {
-      onShowToast?.call(type, existingRecordId != null ? "${type.name} 기록이 수정되었습니다." : "${type.name} 과거 기록이 추가되었습니다.");
-    }
   }
 
   static Future<void> showMemoDialog({
@@ -375,7 +385,14 @@ class RecordManager {
                 } else {
                   await database.addCustomDataRecord(typeId: sleepTypeId, timestamp: startDT, value: val);
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
+                
+                // 실제 저장이 완료된 시점에 토스트 띄우기
+                if (ctx.mounted) {
+                  final types = await database.getCustomDataTypes();
+                  final sleepType = types.firstWhere((t) => t.id == sleepTypeId);
+                  onShowToast?.call(sleepType, existingRecordId != null ? "수면 기록이 수정되었습니다." : "수면 기록이 저장되었습니다.");
+                  Navigator.pop(ctx);
+                }
               },
               child: Text(existingRecordId != null ? "수정하기" : "저장하기", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
@@ -383,12 +400,6 @@ class RecordManager {
         ),
       ),
     );
-
-    if (context.mounted) {
-      final types = await database.getCustomDataTypes();
-      final sleepType = types.firstWhere((t) => t.id == sleepTypeId);
-      onShowToast?.call(sleepType, existingRecordId != null ? "수면 기록이 수정되었습니다." : "수면 기록이 저장되었습니다.");
-    }
   }
 
   static Widget _buildTimeTile({

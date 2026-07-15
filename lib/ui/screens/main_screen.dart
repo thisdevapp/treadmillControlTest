@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../database/database.dart';
+import '../../core/constants/ui_styles.dart'; // 스타일 모듈 추가
 import '../widgets/record_manager.dart';
 import '../widgets/record_type_manager.dart';
 import 'statistics_screen.dart';
@@ -25,6 +26,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   double _longPressSeconds = 4.0;
+  bool _showAllDetails = false; // 통계 상세 표시 설정 상태 추가
   bool _isEditMode = false;
 
   // 드래그 및 리사이즈 상태 관리
@@ -53,6 +55,7 @@ class _MainScreenState extends State<MainScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _longPressSeconds = prefs.getDouble('long_press_seconds') ?? 4.0;
+      _showAllDetails = prefs.getBool('statistics_show_details') ?? false;
     });
   }
 
@@ -61,6 +64,14 @@ class _MainScreenState extends State<MainScreen> {
     await prefs.setDouble('long_press_seconds', value);
     setState(() {
       _longPressSeconds = value;
+    });
+  }
+
+  Future<void> _updateShowAllDetails(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('statistics_show_details', value);
+    setState(() {
+      _showAllDetails = value;
     });
   }
 
@@ -97,7 +108,12 @@ class _MainScreenState extends State<MainScreen> {
         index: _selectedIndex,
         children: [
           _buildDashboardView(),
-          StatisticsScreen(database: widget.database, longPressSeconds: _longPressSeconds),
+          StatisticsScreen(
+            database: widget.database, 
+            longPressSeconds: _longPressSeconds,
+            showAllDetails: _showAllDetails,
+            onShowAllDetailsChanged: _updateShowAllDetails,
+          ),
           _buildSettingsView(),
         ],
       ),
@@ -325,11 +341,11 @@ class _MainScreenState extends State<MainScreen> {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.2), // 배경색 투명도를 20%로 설정
+          color: UIStyles.getWidgetBgColor(color), // 중앙 관리 스타일 적용
           borderRadius: BorderRadius.circular(isSmall ? 18 : 24),
           boxShadow: [
             BoxShadow(
-              color: color.withValues(alpha: 0.1), // 그림자도 더 은은하게 조정
+              color: color.withValues(alpha: UIStyles.shadowOpacity), 
               blurRadius: isActive ? 20 : 10, 
               offset: isActive ? const Offset(0, 8) : const Offset(0, 4)
             )
@@ -385,8 +401,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildWidgetContent(CustomDataType type, int w, int h, Color iconColor) {
     final bool isHorizontal = w > h;
     final IconData iconData = _getIconData(type.iconName);
-    final Brightness brightness = Theme.of(context).brightness;
-    final Color textColor = brightness == Brightness.dark ? Colors.white : Colors.black;
+    final Color textColor = UIStyles.getWidgetTextColor(context); // 중앙 관리 스타일 적용
 
     if (isHorizontal) {
       return LayoutBuilder(builder: (context, constraints) {
@@ -470,6 +485,14 @@ class _MainScreenState extends State<MainScreen> {
       const Divider(),
       ListTile(title: const Text("데이터 삭제를 위한 길게 누르기 시간"), subtitle: Text("통계 지표 꾹 누르기 시간: ${_longPressSeconds.toStringAsFixed(1)}초"), leading: const Icon(Icons.timer_rounded)),
       Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Slider(value: _longPressSeconds, min: 1.0, max: 10.0, divisions: 18, onChanged: (value) => _saveLongPressSeconds(value))),
+      const Divider(),
+      SwitchListTile(
+        title: const Text("통계 그래프 상세 시간 표시"),
+        subtitle: const Text("막대 및 점 옆에 기록된 시간을 항상 노출합니다"),
+        value: _showAllDetails,
+        secondary: const Icon(Icons.segment_rounded),
+        onChanged: _updateShowAllDetails,
+      ),
       const Divider(),
       ListTile(title: const Text("모든 데이터 초기화"), subtitle: const Text("영구 파괴 및 대시보드 리셋"), leading: const Icon(Icons.delete_forever_rounded, color: Colors.redAccent), onTap: () => _confirmResetAllData()),
     ]);

@@ -375,11 +375,8 @@ class RecordManager {
                   endDT = endDT.add(const Duration(days: 1));
                 }
 
-                final val = jsonEncode({
-                  'endUnix': endDT.millisecondsSinceEpoch ~/ 1000,
-                  'memo': memoController.text.trim(),
-                });
-                
+                final val = _encodeSleepValue(endDT, memoController.text.trim());
+
                 if (existingRecordId != null) {
                   await database.updateCustomDataRecord(existingRecordId, timestamp: startDT, value: val);
                 } else {
@@ -400,6 +397,82 @@ class RecordManager {
         ),
       ),
     );
+  }
+
+  /// 수면(기간형) 기록 타입을 찾습니다.
+  static CustomDataType? findSleepType(List<CustomDataType> types) =>
+      types.where((t) => t.isPreset && t.name == '수면').firstOrNull;
+
+  /// 수면 기록의 value(JSON) 생성
+  static String _encodeSleepValue(DateTime end, String memo) => jsonEncode({
+    'endUnix': end.millisecondsSinceEpoch ~/ 1000,
+    'memo': memo,
+  });
+
+  /// 통계 차트에서 손가락으로 지정한 시각(점) 또는 기간(라인)을 어떤 기록으로 저장할지 고르는 팝업
+  /// - end == null (점): 수면 외 기록 (약 복용, 카페인 등)
+  /// - end != null (라인): 수면 기록
+  static Future<void> showChartDraftSaveDialog({
+    required BuildContext context,
+    required AppDatabase database,
+    required DateTime start,
+    DateTime? end,
+    Function(CustomDataType, String)? onShowToast,
+  }) async {
+    final types = await database.getCustomDataTypes();
+    final sleepType = findSleepType(types);
+    final candidates = end != null
+        ? [?sleepType]
+        : types.where((t) => t.id != sleepType?.id).toList();
+    if (!context.mounted) return;
+
+    final f = DateFormat('M/d(E) HH:mm', 'ko_KR');
+    final String timeText;
+    if (end != null) {
+      final diff = end.difference(start);
+      timeText = "${f.format(start)}\n~ ${f.format(end)}\n(${diff.inHours}시간 ${diff.inMinutes % 60}분)";
+    } else {
+      timeText = f.format(start);
+    }
+
+    final selected = await showDialog<CustomDataType>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(end != null ? "기간 기록 저장" : "기록 저장", style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(timeText, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.indigo)),
+              const SizedBox(height: 16),
+              if (candidates.isEmpty)
+                const Text("저장할 수 있는 기록 종류가 없습니다.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey))
+              else
+                ...candidates.map((t) => ListTile(
+                  leading: Icon(getIconData(t.iconName), color: Color(t.colorValue ?? Colors.indigo.toARGB32()), size: 28),
+                  title: Text(t.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  onTap: () => Navigator.pop(ctx, t),
+                )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+        ],
+      ),
+    );
+    if (selected == null) return;
+
+    await database.addCustomDataRecord(
+      typeId: selected.id,
+      timestamp: start,
+      value: end != null ? _encodeSleepValue(end, '') : null,
+    );
+    if (context.mounted) {
+      onShowToast?.call(selected, "${selected.name} 기록이 추가되었습니다.");
+    }
   }
 
   static Widget _buildTimeTile({

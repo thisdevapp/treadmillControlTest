@@ -1,31 +1,25 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    // AGP 9부터 kotlin-android 플러그인을 직접 적용하지 않습니다. (Flutter Gradle 플러그인이 처리)
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.example.sleep_prototype"
     compileSdk = flutter.compileSdkVersion
-    
-    // 플러그인들이 요구하는 최신 NDK 버전으로 설정합니다.
-    // NDK 27은 현재 가장 최신 안정화 버전군에 속하며, 향후 업데이트 시에도 유리합니다.
-    ndkVersion = "27.0.12077973"
+
+    // NDK 버전은 Flutter SDK가 관리하는 값을 따릅니다. (Flutter 업그레이드 시 자동 갱신)
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        // 최신 안드로이드 개발 표준인 Java 17로 업그레이드하여 성능과 호환성을 확보합니다.
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     defaultConfig {
         applicationId = "com.example.sleep_prototype"
-        // 최신 라이브러리(Drift 등) 호환을 위해 minSdk는 최소 21(Android 5.0) 이상을 권장합니다.
-        minSdk = 21 
+        // Flutter 3.47 기준 최소 지원 버전(API 24, Android 7.0)을 따릅니다.
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -35,6 +29,12 @@ android {
         release {
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 

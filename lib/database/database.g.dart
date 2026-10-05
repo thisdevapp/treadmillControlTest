@@ -64,11 +64,10 @@ class $AppMetadataTable extends AppMetadata
   AppMetadataData map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return AppMetadataData(
-      key:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.string,
-            data['${effectivePrefix}key'],
-          )!,
+      key: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}key'],
+      )!,
       value: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}value'],
@@ -99,8 +98,9 @@ class AppMetadataData extends DataClass implements Insertable<AppMetadataData> {
   AppMetadataCompanion toCompanion(bool nullToAbsent) {
     return AppMetadataCompanion(
       key: Value(key),
-      value:
-          value == null && nullToAbsent ? const Value.absent() : Value(value),
+      value: value == null && nullToAbsent
+          ? const Value.absent()
+          : Value(value),
     );
   }
 
@@ -419,16 +419,14 @@ class $CustomDataTypesTable extends CustomDataTypes
   CustomDataType map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return CustomDataType(
-      id:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}id'],
-          )!,
-      name:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.string,
-            data['${effectivePrefix}name'],
-          )!,
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
       iconName: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}icon_name'],
@@ -437,31 +435,26 @@ class $CustomDataTypesTable extends CustomDataTypes
         DriftSqlType.int,
         data['${effectivePrefix}color_value'],
       ),
-      isPreset:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.bool,
-            data['${effectivePrefix}is_preset'],
-          )!,
-      gridX:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}grid_x'],
-          )!,
-      gridY:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}grid_y'],
-          )!,
-      gridWidth:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}grid_width'],
-          )!,
-      gridHeight:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}grid_height'],
-          )!,
+      isPreset: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_preset'],
+      )!,
+      gridX: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}grid_x'],
+      )!,
+      gridY: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}grid_y'],
+      )!,
+      gridWidth: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}grid_width'],
+      )!,
+      gridHeight: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}grid_height'],
+      )!,
     );
   }
 
@@ -515,14 +508,12 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
     return CustomDataTypesCompanion(
       id: Value(id),
       name: Value(name),
-      iconName:
-          iconName == null && nullToAbsent
-              ? const Value.absent()
-              : Value(iconName),
-      colorValue:
-          colorValue == null && nullToAbsent
-              ? const Value.absent()
-              : Value(colorValue),
+      iconName: iconName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(iconName),
+      colorValue: colorValue == null && nullToAbsent
+          ? const Value.absent()
+          : Value(colorValue),
       isPreset: Value(isPreset),
       gridX: Value(gridX),
       gridY: Value(gridY),
@@ -590,14 +581,16 @@ class CustomDataType extends DataClass implements Insertable<CustomDataType> {
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
       iconName: data.iconName.present ? data.iconName.value : this.iconName,
-      colorValue:
-          data.colorValue.present ? data.colorValue.value : this.colorValue,
+      colorValue: data.colorValue.present
+          ? data.colorValue.value
+          : this.colorValue,
       isPreset: data.isPreset.present ? data.isPreset.value : this.isPreset,
       gridX: data.gridX.present ? data.gridX.value : this.gridX,
       gridY: data.gridY.present ? data.gridY.value : this.gridY,
       gridWidth: data.gridWidth.present ? data.gridWidth.value : this.gridWidth,
-      gridHeight:
-          data.gridHeight.present ? data.gridHeight.value : this.gridHeight,
+      gridHeight: data.gridHeight.present
+          ? data.gridHeight.value
+          : this.gridHeight,
     );
   }
 
@@ -922,35 +915,30 @@ class $CustomDataRecordsTable extends CustomDataRecords
   CustomDataRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return CustomDataRecord(
-      id:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}id'],
-          )!,
-      typeId:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}type_id'],
-          )!,
-      unixTimestamp:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}unix_timestamp'],
-          )!,
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      typeId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}type_id'],
+      )!,
+      unixTimestamp: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}unix_timestamp'],
+      )!,
       value: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}value'],
       ),
-      timezone:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.string,
-            data['${effectivePrefix}timezone'],
-          )!,
-      offsetSeconds:
-          attachedDatabase.typeMapping.read(
-            DriftSqlType.int,
-            data['${effectivePrefix}offset_seconds'],
-          )!,
+      timezone: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}timezone'],
+      )!,
+      offsetSeconds: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}offset_seconds'],
+      )!,
     );
   }
 
@@ -995,8 +983,9 @@ class CustomDataRecord extends DataClass
       id: Value(id),
       typeId: Value(typeId),
       unixTimestamp: Value(unixTimestamp),
-      value:
-          value == null && nullToAbsent ? const Value.absent() : Value(value),
+      value: value == null && nullToAbsent
+          ? const Value.absent()
+          : Value(value),
       timezone: Value(timezone),
       offsetSeconds: Value(offsetSeconds),
     );
@@ -1048,16 +1037,14 @@ class CustomDataRecord extends DataClass
     return CustomDataRecord(
       id: data.id.present ? data.id.value : this.id,
       typeId: data.typeId.present ? data.typeId.value : this.typeId,
-      unixTimestamp:
-          data.unixTimestamp.present
-              ? data.unixTimestamp.value
-              : this.unixTimestamp,
+      unixTimestamp: data.unixTimestamp.present
+          ? data.unixTimestamp.value
+          : this.unixTimestamp,
       value: data.value.present ? data.value.value : this.value,
       timezone: data.timezone.present ? data.timezone.value : this.timezone,
-      offsetSeconds:
-          data.offsetSeconds.present
-              ? data.offsetSeconds.value
-              : this.offsetSeconds,
+      offsetSeconds: data.offsetSeconds.present
+          ? data.offsetSeconds.value
+          : this.offsetSeconds,
     );
   }
 
@@ -1299,19 +1286,17 @@ class $$AppMetadataTableTableManager
         TableManagerState(
           db: db,
           table: table,
-          createFilteringComposer:
-              () => $$AppMetadataTableFilterComposer($db: db, $table: table),
-          createOrderingComposer:
-              () => $$AppMetadataTableOrderingComposer($db: db, $table: table),
-          createComputedFieldComposer:
-              () =>
-                  $$AppMetadataTableAnnotationComposer($db: db, $table: table),
-          updateCompanionCallback:
-              ({
-                Value<String> key = const Value.absent(),
-                Value<String?> value = const Value.absent(),
-                Value<int> rowid = const Value.absent(),
-              }) => AppMetadataCompanion(key: key, value: value, rowid: rowid),
+          createFilteringComposer: () =>
+              $$AppMetadataTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$AppMetadataTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$AppMetadataTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> key = const Value.absent(),
+            Value<String?> value = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) => AppMetadataCompanion(key: key, value: value, rowid: rowid),
           createCompanionCallback:
               ({
                 required String key,
@@ -1322,16 +1307,18 @@ class $$AppMetadataTableTableManager
                 value: value,
                 rowid: rowid,
               ),
-          withReferenceMapper:
-              (p0) =>
-                  p0
-                      .map(
-                        (e) => (
-                          e.readTable(table),
-                          BaseReferences(db, table, e),
-                        ),
-                      )
-                      .toList(),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$AppMetadataTable, AppMetadataData>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $AppMetadataTable,
+                    AppMetadataData
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
           prefetchHooksCallback: null,
         ),
       );
@@ -1392,10 +1379,7 @@ final class $$CustomDataTypesTableReferences
   _customDataRecordsRefsTable(_$AppDatabase db) =>
       MultiTypedResultKey.fromTable(
         db.customDataRecords,
-        aliasName: $_aliasNameGenerator(
-          db.customDataTypes.id,
-          db.customDataRecords.typeId,
-        ),
+        aliasName: 'custom_data_types__id__custom_data_records__type_id',
       );
 
   $$CustomDataRecordsTableProcessedTableManager get customDataRecordsRefs {
@@ -1637,19 +1621,12 @@ class $$CustomDataTypesTableTableManager
         TableManagerState(
           db: db,
           table: table,
-          createFilteringComposer:
-              () =>
-                  $$CustomDataTypesTableFilterComposer($db: db, $table: table),
-          createOrderingComposer:
-              () => $$CustomDataTypesTableOrderingComposer(
-                $db: db,
-                $table: table,
-              ),
-          createComputedFieldComposer:
-              () => $$CustomDataTypesTableAnnotationComposer(
-                $db: db,
-                $table: table,
-              ),
+          createFilteringComposer: () =>
+              $$CustomDataTypesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CustomDataTypesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CustomDataTypesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
@@ -1694,16 +1671,14 @@ class $$CustomDataTypesTableTableManager
                 gridWidth: gridWidth,
                 gridHeight: gridHeight,
               ),
-          withReferenceMapper:
-              (p0) =>
-                  p0
-                      .map(
-                        (e) => (
-                          e.readTable(table),
-                          $$CustomDataTypesTableReferences(db, table, e),
-                        ),
-                      )
-                      .toList(),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$CustomDataTypesTable, CustomDataType>(table),
+                  $$CustomDataTypesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
           prefetchHooksCallback: ({customDataRecordsRefs = false}) {
             return PrefetchHooks(
               db: db,
@@ -1722,16 +1697,14 @@ class $$CustomDataTypesTableTableManager
                       currentTable: table,
                       referencedTable: $$CustomDataTypesTableReferences
                           ._customDataRecordsRefsTable(db),
-                      managerFromTypedResult:
-                          (p0) =>
-                              $$CustomDataTypesTableReferences(
-                                db,
-                                table,
-                                p0,
-                              ).customDataRecordsRefs,
-                      referencedItemsForCurrentItem:
-                          (item, referencedItems) =>
-                              referencedItems.where((e) => e.typeId == item.id),
+                      managerFromTypedResult: (p0) =>
+                          $$CustomDataTypesTableReferences(
+                            db,
+                            table,
+                            p0,
+                          ).customDataRecordsRefs,
+                      referencedItemsForCurrentItem: (item, referencedItems) =>
+                          referencedItems.where((e) => e.typeId == item.id),
                       typedResults: items,
                     ),
                 ];
@@ -1788,13 +1761,9 @@ final class $$CustomDataRecordsTableReferences
     super.$_typedResult,
   );
 
-  static $CustomDataTypesTable _typeIdTable(_$AppDatabase db) =>
-      db.customDataTypes.createAlias(
-        $_aliasNameGenerator(
-          db.customDataRecords.typeId,
-          db.customDataTypes.id,
-        ),
-      );
+  static $CustomDataTypesTable _typeIdTable(_$AppDatabase db) => db
+      .customDataTypes
+      .createAlias('custom_data_records__type_id__custom_data_types__id');
 
   $$CustomDataTypesTableProcessedTableManager get typeId {
     final $_column = $_itemColumn<int>('type_id')!;
@@ -2001,18 +1970,12 @@ class $$CustomDataRecordsTableTableManager
         TableManagerState(
           db: db,
           table: table,
-          createFilteringComposer:
-              () => $$CustomDataRecordsTableFilterComposer(
-                $db: db,
-                $table: table,
-              ),
-          createOrderingComposer:
-              () => $$CustomDataRecordsTableOrderingComposer(
-                $db: db,
-                $table: table,
-              ),
-          createComputedFieldComposer:
-              () => $$CustomDataRecordsTableAnnotationComposer(
+          createFilteringComposer: () =>
+              $$CustomDataRecordsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CustomDataRecordsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CustomDataRecordsTableAnnotationComposer(
                 $db: db,
                 $table: table,
               ),
@@ -2048,52 +2011,48 @@ class $$CustomDataRecordsTableTableManager
                 timezone: timezone,
                 offsetSeconds: offsetSeconds,
               ),
-          withReferenceMapper:
-              (p0) =>
-                  p0
-                      .map(
-                        (e) => (
-                          e.readTable(table),
-                          $$CustomDataRecordsTableReferences(db, table, e),
-                        ),
-                      )
-                      .toList(),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$CustomDataRecordsTable, CustomDataRecord>(table),
+                  $$CustomDataRecordsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
           prefetchHooksCallback: ({typeId = false}) {
             return PrefetchHooks(
               db: db,
               explicitlyWatchedTables: [],
-              addJoins: <
-                T extends TableManagerState<
-                  dynamic,
-                  dynamic,
-                  dynamic,
-                  dynamic,
-                  dynamic,
-                  dynamic,
-                  dynamic,
-                  dynamic,
-                  dynamic,
-                  dynamic,
-                  dynamic
-                >
-              >(state) {
-                if (typeId) {
-                  state =
-                      state.withJoin(
-                            currentTable: table,
-                            currentColumn: table.typeId,
-                            referencedTable: $$CustomDataRecordsTableReferences
-                                ._typeIdTable(db),
-                            referencedColumn:
-                                $$CustomDataRecordsTableReferences
-                                    ._typeIdTable(db)
-                                    .id,
-                          )
-                          as T;
-                }
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (typeId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.typeId,
+                        referencedTable: $$CustomDataRecordsTableReferences
+                            ._typeIdTable(db),
+                        referencedColumn: $$CustomDataRecordsTableReferences
+                            ._typeIdTable(db)
+                            .id,
+                      ) as T;
+                    }
 
-                return state;
-              },
+                    return state;
+                  },
               getPrefetchedDataCallback: (items) async {
                 return [];
               },

@@ -479,12 +479,18 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildSettingsView() {
     return ListView(children: [
       const Padding(padding: EdgeInsets.all(16.0), child: Text("환경 설정", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-      RadioListTile<ThemeMode>(title: const Text("시스템 설정"), value: ThemeMode.system, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
-      RadioListTile<ThemeMode>(title: const Text("라이트 모드"), value: ThemeMode.light, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
-      RadioListTile<ThemeMode>(title: const Text("다크 모드"), value: ThemeMode.dark, groupValue: widget.currentThemeMode, onChanged: (value) => widget.onThemeChanged(value!)),
+      RadioGroup<ThemeMode>(
+        groupValue: widget.currentThemeMode,
+        onChanged: (value) => widget.onThemeChanged(value!),
+        child: const Column(children: [
+          RadioListTile<ThemeMode>(title: Text("시스템 설정"), value: ThemeMode.system),
+          RadioListTile<ThemeMode>(title: Text("라이트 모드"), value: ThemeMode.light),
+          RadioListTile<ThemeMode>(title: Text("다크 모드"), value: ThemeMode.dark),
+        ]),
+      ),
       const Divider(),
-      ListTile(title: const Text("데이터 삭제를 위한 길게 누르기 시간"), subtitle: Text("통계 지표 꾹 누르기 시간: ${_longPressSeconds.toStringAsFixed(1)}초"), leading: const Icon(Icons.timer_rounded)),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Slider(value: _longPressSeconds, min: 1.0, max: 10.0, divisions: 18, onChanged: (value) => _saveLongPressSeconds(value))),
+      ListTile(title: const Text("통계 차트 꾹 누르기 시간"), subtitle: Text("기록 추가·수정·삭제 시 꾹 누르기 시간: ${_longPressSeconds.toStringAsFixed(1)}초"), leading: const Icon(Icons.timer_rounded)),
+      Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Slider(value: _longPressSeconds, min: 0.5, max: 10.0, divisions: 19, onChanged: (value) => _saveLongPressSeconds(value))),
       const Divider(),
       SwitchListTile(
         title: const Text("통계 그래프 상세 시간 표시"),

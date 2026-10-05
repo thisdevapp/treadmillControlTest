@@ -39,6 +39,7 @@
 - **무제한 아이콘 선택**: FAB 메뉴의 '다른 아이콘...' 버튼을 통해 Material Design에서 제공하는 수많은 아이콘 중 원하는 것을 골라 자유롭게 기록을 추가할 수 있습니다.
 - **FAB 메뉴 UI 최적화**: 아이콘 주변의 불필요한 박스를 제거하고 아이콘 자체를 강조한 깔끔한 레이아웃을 적용했습니다.
 - **통합 관리 메뉴**: 기록을 꾹 누르면 [수정/삭제]를 선택할 수 있는 세로형 큰 버튼 메뉴가 나타납니다.
+- **제스처 기록 추가**: 차트의 빈 칸을 꾹 누르면(설정의 '꾹 누르기 시간', 수정/삭제와 동일) 점이 생기고, 손을 떼지 않은 채 드래그해 시간을 지정합니다(5분 단위). 드래그 도중 같은 날짜 칸이나 옆 칸에 손가락을 하나 더 대면 기간(라인)으로 전환됩니다. 모든 손가락을 떼면 점은 수면 외 기록(약 복용 등), 라인은 수면 기록 중에서 저장할 종류를 고르는 팝업이 뜹니다.
 - **터치 정밀도 보정**: 14일/30일 보기처럼 요소가 작을 때도 꾹 누르는 도중 미세한 드래그(20px 이내)를 허용하며, 터치 타겟 반경을 25px 이상 확보하여 조작 실패를 방지합니다.
 
 ### 3. 기기 최적화 (Device Optimization)
@@ -50,6 +51,10 @@
 - `lib/ui/widgets/`: `record_manager.dart` (기록 통합 모듈), 공용 피커 등.
 
 ## ⚙️ 실행 방법
+**개발 환경**: Flutter 3.47.6 (Dart 3.13) / Gradle 9.8.0 / AGP 9.4.1 / Kotlin 2.4.20 / JDK 25 (Android Studio 내장 JBR) / minSdk 24
+- AGP 9 대응: `android/gradle.properties`의 `android.newDsl=false`, `android.builtInKotlin=false`는 Flutter 템플릿 권장값이므로, 모든 플러그인이 built-in Kotlin으로 이전되기 전까지 유지합니다.
+- NDK는 `flutter.ndkVersion`(현재 28.2)을 따릅니다. 자동 설치가 실패하면 `android sdk install "ndk;28.2.13676358"`으로 직접 설치합니다.
+
 ```bash
 flutter pub get
 dart run build_runner build --delete-conflicting-outputs

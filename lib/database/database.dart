@@ -261,6 +261,19 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
+  /// 현재 DB 전체를 [path] 파일로 복사 (열려 있는 DB도 일관된 상태로 복사되는 SQLite VACUUM INTO 사용).
+  /// 이미 있는 파일에는 쓰지 않으므로 기존 백업을 덮어쓰지 않음
+  Future<File> backupToFile(String path) async {
+    final file = File(path);
+    if (await file.exists()) throw StateError('백업 파일이 이미 존재합니다: $path');
+    await file.parent.create(recursive: true);
+    await customStatement('VACUUM INTO ?', [path]);
+    if (!await file.exists() || await file.length() == 0) {
+      throw StateError('DB 백업 파일이 생성되지 않았습니다.');
+    }
+    return file;
+  }
+
   // === CustomDataType CRUD ===
   Stream<List<CustomDataType>> watchCustomDataTypes() => 
       (select(customDataTypes)..orderBy([(t) => OrderingTerm(expression: t.gridY), (t) => OrderingTerm(expression: t.gridX)])).watch();

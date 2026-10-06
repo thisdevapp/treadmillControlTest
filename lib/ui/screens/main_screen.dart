@@ -5,7 +5,9 @@ import '../../database/database.dart';
 import '../../core/constants/ui_styles.dart'; // 스타일 모듈 추가
 import '../widgets/record_manager.dart';
 import '../widgets/record_type_manager.dart';
+import 'convenience_settings_screen.dart';
 import 'statistics_screen.dart';
+import 'sync_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final ThemeMode currentThemeMode;
@@ -27,6 +29,7 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   double _longPressSeconds = 4.0;
   bool _showAllDetails = false; // 통계 상세 표시 설정 상태 추가
+  ChartDateLabelMode _dateLabelMode = ChartDateLabelMode.dynamic;
   bool _isEditMode = false;
 
   // 드래그 및 리사이즈 상태 관리
@@ -56,6 +59,16 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _longPressSeconds = prefs.getDouble('long_press_seconds') ?? 4.0;
       _showAllDetails = prefs.getBool('statistics_show_details') ?? false;
+      final int labelModeIndex = prefs.getInt('chart_date_label_mode') ?? 0;
+      _dateLabelMode = ChartDateLabelMode.values[labelModeIndex.clamp(0, ChartDateLabelMode.values.length - 1)];
+    });
+  }
+
+  Future<void> _saveDateLabelMode(ChartDateLabelMode mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('chart_date_label_mode', mode.index);
+    setState(() {
+      _dateLabelMode = mode;
     });
   }
 
@@ -113,6 +126,7 @@ class _MainScreenState extends State<MainScreen> {
             longPressSeconds: _longPressSeconds,
             showAllDetails: _showAllDetails,
             onShowAllDetailsChanged: _updateShowAllDetails,
+            dateLabelMode: _dateLabelMode,
           ),
           _buildSettingsView(),
         ],
@@ -479,18 +493,20 @@ class _MainScreenState extends State<MainScreen> {
   Widget _buildSettingsView() {
     return ListView(children: [
       const Padding(padding: EdgeInsets.all(16.0), child: Text("환경 설정", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-      RadioGroup<ThemeMode>(
-        groupValue: widget.currentThemeMode,
-        onChanged: (value) => widget.onThemeChanged(value!),
-        child: const Column(children: [
-          RadioListTile<ThemeMode>(title: Text("시스템 설정"), value: ThemeMode.system),
-          RadioListTile<ThemeMode>(title: Text("라이트 모드"), value: ThemeMode.light),
-          RadioListTile<ThemeMode>(title: Text("다크 모드"), value: ThemeMode.dark),
-        ]),
+      ListTile(
+        title: const Text("편의성 기능"),
+        subtitle: const Text("테마, 꾹 누르기 시간, 차트 보기"),
+        leading: const Icon(Icons.tune_rounded),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ConvenienceSettingsScreen(
+          themeMode: widget.currentThemeMode,
+          onThemeChanged: widget.onThemeChanged,
+          longPressSeconds: _longPressSeconds,
+          onLongPressSecondsChanged: _saveLongPressSeconds,
+          dateLabelMode: _dateLabelMode,
+          onDateLabelModeChanged: _saveDateLabelMode,
+        ))),
       ),
-      const Divider(),
-      ListTile(title: const Text("통계 차트 꾹 누르기 시간"), subtitle: Text("기록 추가·수정·삭제 시 꾹 누르기 시간: ${_longPressSeconds.toStringAsFixed(1)}초"), leading: const Icon(Icons.timer_rounded)),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Slider(value: _longPressSeconds, min: 0.5, max: 10.0, divisions: 19, onChanged: (value) => _saveLongPressSeconds(value))),
       const Divider(),
       SwitchListTile(
         title: const Text("통계 그래프 상세 시간 표시"),
@@ -498,6 +514,14 @@ class _MainScreenState extends State<MainScreen> {
         value: _showAllDetails,
         secondary: const Icon(Icons.segment_rounded),
         onChanged: _updateShowAllDetails,
+      ),
+      const Divider(),
+      ListTile(
+        title: const Text("기록 동기화"),
+        subtitle: const Text("Withings 등 외부 기기의 기록 가져오기"),
+        leading: const Icon(Icons.sync_rounded),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SyncScreen(database: widget.database))),
       ),
       const Divider(),
       ListTile(title: const Text("모든 데이터 초기화"), subtitle: const Text("영구 파괴 및 대시보드 리셋"), leading: const Icon(Icons.delete_forever_rounded, color: Colors.redAccent), onTap: () => _confirmResetAllData()),

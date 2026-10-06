@@ -13,6 +13,28 @@ import '../widgets/custom_picker_utils.dart';
 import '../widgets/record_manager.dart';
 import '../widgets/record_type_manager.dart';
 
+/// 차트 상단 날짜 표기 방식 (설정 > 편의성 기능 > 차트 보기 > 날짜 표기)
+enum ChartDateLabelMode {
+  /// 좌우 공간에 따라 45도 / 90도 자동 선택
+  dynamic,
+  /// 요일 위, 날짜 아래로 가로 표기
+  horizontal,
+  /// 항상 90도로 세워서 표기
+  vertical;
+
+  String get label => switch (this) {
+    ChartDateLabelMode.dynamic => "동적",
+    ChartDateLabelMode.horizontal => "가로",
+    ChartDateLabelMode.vertical => "세로",
+  };
+
+  String get description => switch (this) {
+    ChartDateLabelMode.dynamic => "공간이 넉넉하면 45도, 부족하면 90도로 세워서 표기",
+    ChartDateLabelMode.horizontal => "요일 아래에 날짜를 가로로 표기",
+    ChartDateLabelMode.vertical => "항상 90도로 세워서 표기",
+  };
+}
+
 /// 모든 차트 요소의 크기와 패딩을 중앙 관리하는 클래스
 class _ChartMetrics {
   final double barWidth;
@@ -21,25 +43,84 @@ class _ChartMetrics {
   final double dateFontSize;
   final double valueFontSize;
   final double topPadding;
+  /// 상단 날짜 라벨 회전 각도 (시계방향, 0이면 요일/날짜 두 줄 가로 표기)
+  final double headerAngle;
 
-  factory _ChartMetrics(double dayWidth) {
+  /// 상단 날짜 라벨과 차트 사이 간격
+  static const double headerGap = 6.0;
+  /// 이웃한 날짜 라벨 사이에 최소한 확보할 여백
+  static const double headerSpacing = 2.0;
+  /// 가로 표기 시 날짜를 요일 쪽으로 끌어올리는 양
+  static const double stackedOverlap = 4.0;
+  static final Map<double, (Size, double)> _headerSizeCache = {};
+
+  factory _ChartMetrics(double dayWidth, ChartDateLabelMode mode) {
     double bw = (dayWidth * 0.75).clamp(6.0, 150.0);
-    bw = (bw * 2).roundToDouble() / 2.0; 
+    bw = (bw * 2).roundToDouble() / 2.0;
 
-    final double lfs = (bw * 0.25 + 6).clamp(8.0, 30.0); 
-    final double dfs = (bw * 0.5 + 7).clamp(10.0, 60.0);  
-    final double vfs = (bw * 0.3 + 4).clamp(7.0, 32.0);  
-    
-    final double calculatedTopPadding = lfs + dfs;
-    
+    final double lfs = (bw * 0.25 + 6).clamp(8.0, 30.0);
+    final double dfs = (bw * 0.5 + 7).clamp(10.0, 60.0);
+    final double vfs = (bw * 0.3 + 4).clamp(7.0, 32.0);
+
+    // 글꼴 크기는 bw로만 정해지므로 라벨 크기는 bw 단위로 캐시
+    // (한 줄 라벨 크기, 두 줄 가로 표기 높이)
+    final (Size header, double stackedHeight) = _headerSizeCache.putIfAbsent(bw, () {
+      final tp = headerPainter("월", "00", lfs, dfs, Colors.grey);
+      final tpLabel = stackedLabelPainter("월", lfs);
+      final tpDate = stackedDatePainter("00", dfs, Colors.grey);
+      return (tp.size, tpLabel.height - stackedOverlap + tpDate.height);
+    });
+
+    final double angle;
+    final double headerHeight;
+    if (mode == ChartDateLabelMode.horizontal) {
+      angle = 0;
+      headerHeight = stackedHeight;
+    } else {
+      // 좌우 공간 체크: 45도로 기울이면 이웃 라벨과의 수직 간격이 dayWidth * sin45로 줄어듦.
+      // 이 간격이 라벨 높이보다 좁으면 겹치므로 90도로 세워서 dayWidth 전체를 사용
+      final bool fitsDiagonal = dayWidth * math.sin(math.pi / 4) >= header.height + headerSpacing;
+      angle = mode == ChartDateLabelMode.dynamic && fitsDiagonal ? math.pi / 4 : math.pi / 2;
+      // 회전된 라벨이 차지하는 세로 높이 = 너비 * sinθ + 높이 * cosθ
+      headerHeight = header.width * math.sin(angle) + header.height * math.cos(angle);
+    }
+
     return _ChartMetrics._(
       barWidth: bw,
       medRadius: bw / 2.0,
       labelFontSize: lfs,
       dateFontSize: dfs,
       valueFontSize: vfs,
-      topPadding: calculatedTopPadding.clamp(20.0, 150.0),
+      topPadding: (headerHeight + headerGap + 2).clamp(20.0, 150.0),
+      headerAngle: angle,
     );
+  }
+
+  /// 상단 날짜 라벨 (요일 + 날짜를 한 줄로)
+  static TextPainter headerPainter(String weekday, String day, double lfs, double dfs, Color dateColor) {
+    return TextPainter(
+      text: TextSpan(children: [
+        TextSpan(text: weekday, style: TextStyle(color: Colors.grey, fontSize: lfs)),
+        TextSpan(text: " $day", style: TextStyle(color: dateColor, fontSize: dfs, fontWeight: FontWeight.bold)),
+      ]),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+  }
+
+  /// 가로 표기용 요일 (윗줄)
+  static TextPainter stackedLabelPainter(String weekday, double lfs) {
+    return TextPainter(
+      text: TextSpan(text: weekday, style: TextStyle(color: Colors.grey, fontSize: lfs)),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+  }
+
+  /// 가로 표기용 날짜 (아랫줄)
+  static TextPainter stackedDatePainter(String day, double dfs, Color dateColor) {
+    return TextPainter(
+      text: TextSpan(text: day, style: TextStyle(color: dateColor, fontSize: dfs, fontWeight: FontWeight.bold)),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
   }
 
   _ChartMetrics._({
@@ -49,6 +130,7 @@ class _ChartMetrics {
     required this.dateFontSize,
     required this.valueFontSize,
     required this.topPadding,
+    required this.headerAngle,
   });
 }
 
@@ -91,6 +173,22 @@ class _StaticYAxisPainter extends CustomPainter {
       oldDelegate.metrics.topPadding != metrics.topPadding || oldDelegate.isDarkMode != isDarkMode;
 }
 
+/// 차트 페이지 클립: 상단 날짜 라벨 구간은 전체 너비, 그 아래 차트 구간은 Y축 영역을 제외
+class _ChartPageClipper extends CustomClipper<Path> {
+  final double left;
+  final double top;
+
+  _ChartPageClipper({required this.left, required this.top});
+
+  @override
+  Path getClip(Size size) => Path()
+    ..addRect(Rect.fromLTRB(0, 0, size.width, top))
+    ..addRect(Rect.fromLTRB(left, top, size.width, size.height));
+
+  @override
+  bool shouldReclip(covariant _ChartPageClipper oldClipper) => oldClipper.left != left || oldClipper.top != top;
+}
+
 class _HitInfo {
   final int recordId;
   final String hitType;
@@ -114,13 +212,15 @@ class StatisticsScreen extends StatefulWidget {
   final double longPressSeconds;
   final bool showAllDetails;
   final Function(bool) onShowAllDetailsChanged;
+  final ChartDateLabelMode dateLabelMode;
 
   const StatisticsScreen({
-    super.key, 
-    required this.database, 
+    super.key,
+    required this.database,
     required this.longPressSeconds,
     required this.showAllDetails,
     required this.onShowAllDetailsChanged,
+    required this.dateLabelMode,
   });
 
   @override
@@ -250,22 +350,16 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                   builder: (context, constraints) {
                     final double dataAreaWidth = constraints.maxWidth - yAxisWidth;
                     final double dayWidth = dataAreaWidth / _selectedPeriodDays;
-                    final metrics = _ChartMetrics(dayWidth);
+                    final metrics = _ChartMetrics(dayWidth, widget.dateLabelMode);
 
-                    return Row(
+                    // 페이지는 Y축 영역까지 포함한 전체 너비로 그리고, Y축 영역은 상단 날짜 라벨 구간만 보이도록 잘라냄
+                    // (첫 날짜의 기울어진 라벨이 왼쪽으로 잘리지 않도록)
+                    return Stack(
                       children: [
-                        SizedBox(
-                          width: yAxisWidth,
-                          height: double.infinity,
-                          child: CustomPaint(
-                            painter: _StaticYAxisPainter(
-                              metrics: metrics,
-                              isDarkMode: Theme.of(context).brightness == Brightness.dark,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: PageView.builder(
+                        Positioned.fill(
+                          child: ClipPath(
+                            clipper: _ChartPageClipper(left: yAxisWidth, top: metrics.topPadding - 1),
+                            child: PageView.builder(
                             controller: _pageController,
                             reverse: true, 
                             physics: _isChartDrafting
@@ -289,9 +383,23 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                                     setState(() => _isChartDrafting = drafting);
                                   }
                                 },
-                                yAxisWidth: 0,
+                                yAxisWidth: yAxisWidth,
+                                dateLabelMode: widget.dateLabelMode,
                               );
                             },
+                          ),
+                          ),
+                        ),
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: yAxisWidth,
+                          child: CustomPaint(
+                            painter: _StaticYAxisPainter(
+                              metrics: metrics,
+                              isDarkMode: Theme.of(context).brightness == Brightness.dark,
+                            ),
                           ),
                         ),
                       ],
@@ -693,8 +801,10 @@ class _StatisticsPageContent extends StatefulWidget {
   final double yAxisWidth;
   final Function(_HitInfo) onExecuteLongPress;
   final Function(bool) onDraftingChanged;
+  final ChartDateLabelMode dateLabelMode;
 
   const _StatisticsPageContent({
+    required this.dateLabelMode,
     required this.database,
     required this.pageIndex,
     required this.periodDays,
@@ -867,10 +977,12 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
                   dayWidth: dayWidth,
                   showAllDetails: widget.showAllDetails,
                   yAxisWidth: widget.yAxisWidth,
+                  dateLabelMode: widget.dateLabelMode,
                 ),
                 foregroundPainter: _draftStart == null || _startDrop == null ? null : _DraftPainter(
                   dates: pageDates,
                   dayWidth: dayWidth,
+                  dateLabelMode: widget.dateLabelMode,
                   left: widget.yAxisWidth,
                   start: _draftStart!,
                   end: _draftEnd,
@@ -1040,7 +1152,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     final double dt = ((elapsed - _lastDropTick).inMicroseconds / 1e6).clamp(0.0, 0.05);
     _lastDropTick = elapsed;
     // 꼬리가 너무 길게 늘어지지 않도록 점 반지름의 3배까지만 허용
-    final double maxStretch = math.max(_ChartMetrics(frame.dayWidth).medRadius, 6.0) * 3;
+    final double maxStretch = math.max(_ChartMetrics(frame.dayWidth, widget.dateLabelMode).medRadius, 6.0) * 3;
 
     setState(() {
       _stepDrop(startDrop, _anchorOffset(start, frame), _primaryPointer != null, dt, maxStretch);
@@ -1064,7 +1176,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
   }
 
   Offset _anchorOffset(_DraftAnchor a, _ChartFrame frame) {
-    final metrics = _ChartMetrics(frame.dayWidth);
+    final metrics = _ChartMetrics(frame.dayWidth, widget.dateLabelMode);
     const double bottomPadding = 30.0;
     final double chartHeight = frame.height - metrics.topPadding - bottomPadding;
     return Offset(
@@ -1123,15 +1235,15 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
   }
 
   bool _isInChartArea(Offset pos, _ChartFrame frame) {
-    final metrics = _ChartMetrics(frame.dayWidth);
-    return pos.dy >= metrics.topPadding && pos.dy <= frame.height - 30.0;
+    final metrics = _ChartMetrics(frame.dayWidth, widget.dateLabelMode);
+    return pos.dx >= widget.yAxisWidth && pos.dy >= metrics.topPadding && pos.dy <= frame.height - 30.0;
   }
 
   int _dayIdxAt(double dx, _ChartFrame frame) =>
       ((dx - widget.yAxisWidth) / frame.dayWidth).floor().clamp(0, frame.dates.length - 1);
 
   _DraftAnchor _anchorAt(Offset pos, _ChartFrame frame, {int? nearDayIdx, required bool allowDayEnd}) {
-    final metrics = _ChartMetrics(frame.dayWidth);
+    final metrics = _ChartMetrics(frame.dayWidth, widget.dateLabelMode);
     const double bottomPadding = 30.0;
     final double chartHeight = frame.height - metrics.topPadding - bottomPadding;
 
@@ -1169,7 +1281,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
 
   _HitInfo? _checkHit(Offset pos, List<DateTime> dates, List<CustomDataRecord> records, List<CustomDataType> types, double dayWidth, double left, double height) {
     if (types.isEmpty) return null;
-    final metrics = _ChartMetrics(dayWidth);
+    final metrics = _ChartMetrics(dayWidth, widget.dateLabelMode);
     
     const double bottomPadding = 30.0;
     final double chartHeight = height - metrics.topPadding - bottomPadding;
@@ -1254,8 +1366,10 @@ class SleepTimelinePainter extends CustomPainter {
   final double dayWidth;
   final bool showAllDetails;
   final double yAxisWidth;
+  final ChartDateLabelMode dateLabelMode;
 
   SleepTimelinePainter({
+    required this.dateLabelMode,
     required this.allDates, 
     required this.records, 
     required this.types, 
@@ -1268,7 +1382,7 @@ class SleepTimelinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (types.isEmpty) return;
-    final metrics = _ChartMetrics(dayWidth);
+    final metrics = _ChartMetrics(dayWidth, dateLabelMode);
     const double bottomPadding = 30.0;
     final double chartHeight = size.height - metrics.topPadding - bottomPadding;
     final double chartBottom = metrics.topPadding + chartHeight;
@@ -1278,21 +1392,38 @@ class SleepTimelinePainter extends CustomPainter {
     // 배경 그리드 (6시간 간격)
     for (int h = 0; h <= 24; h += 6) {
       double y = metrics.topPadding + (h / 24.0) * chartHeight;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+      canvas.drawLine(Offset(yAxisWidth, y), Offset(size.width, y), gridPaint);
     }
 
     final sleepType = types.firstWhere((t) => t.isPreset && t.name == '수면', orElse: () => types[0]);
 
     for (int i = 0; i < allDates.length; i++) {
       final date = allDates[i];
-      final double centerX = (i * dayWidth) + (dayWidth / 2);
+      final double centerX = yAxisWidth + (i * dayWidth) + (dayWidth / 2);
 
       // 상단 날짜 라벨
-      final tpLabel = _getTextPainter(DateFormat('E', 'ko_KR').format(date), metrics.labelFontSize, Colors.grey);
-      final tpDate = _getTextPainter(DateFormat('dd').format(date), metrics.dateFontSize, isDarkMode ? Colors.white : Colors.black, isBold: true);
-      
-      _drawTextWithPainter(canvas, tpLabel, Offset(centerX - tpLabel.width / 2, 0));
-      _drawTextWithPainter(canvas, tpDate, Offset(centerX - tpDate.width / 2, tpLabel.height - 4.0));
+      final String weekdayText = DateFormat('E', 'ko_KR').format(date);
+      final String dayText = DateFormat('dd').format(date);
+      final Color dateColor = isDarkMode ? Colors.white : Colors.black;
+      if (metrics.headerAngle == 0) {
+        // 가로 표기: 요일 아래에 날짜, 날짜 아랫면이 차트 상단에서 headerGap만큼 떨어지도록 배치
+        final tpLabel = _ChartMetrics.stackedLabelPainter(weekdayText, metrics.labelFontSize);
+        final tpDate = _ChartMetrics.stackedDatePainter(dayText, metrics.dateFontSize, dateColor);
+        final double dateY = metrics.topPadding - _ChartMetrics.headerGap - tpDate.height;
+        tpDate.paint(canvas, Offset(centerX - tpDate.width / 2, dateY));
+        tpLabel.paint(canvas, Offset(centerX - tpLabel.width / 2, dateY + _ChartMetrics.stackedOverlap - tpLabel.height));
+      } else {
+        // 기울여 표기: 시계방향으로 회전해 라벨 끝이 날짜 칸 중앙을 가리키도록 배치
+        final tpHeader = _ChartMetrics.headerPainter(weekdayText, dayText, metrics.labelFontSize, metrics.dateFontSize, dateColor);
+        // 회전된 라벨의 가장 아래 모서리가 차트 상단에서 headerGap만큼 떨어지도록 끝점 높이 보정
+        // (90도일 때는 보정 0 → 라벨이 칸 중앙에 세로로 서고 끝이 차트 바로 위에 옴)
+        final double halfH = tpHeader.height / 2 * math.cos(metrics.headerAngle);
+        canvas.save();
+        canvas.translate(centerX, metrics.topPadding - _ChartMetrics.headerGap - halfH);
+        canvas.rotate(metrics.headerAngle);
+        tpHeader.paint(canvas, Offset(-tpHeader.width, -tpHeader.height / 2));
+        canvas.restore();
+      }
 
       // 날짜 구분 수직선
       canvas.drawLine(Offset(centerX, metrics.topPadding), Offset(centerX, chartBottom), gridPaint);
@@ -1433,8 +1564,8 @@ class SleepTimelinePainter extends CustomPainter {
               final durationStr = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}";
               
               final tpDur = _getTextPainter(
-                durationStr, 
-                (metrics.valueFontSize * 0.85).clamp(8, 20), 
+                durationStr,
+                metrics.valueFontSize,
                 isDarkMode ? Colors.black : Colors.white, // 바탕색과 대비되도록 (라이트:흰색, 다크:검정)
                 isBold: true
               );
@@ -1451,11 +1582,9 @@ class SleepTimelinePainter extends CustomPainter {
             final typeColor = Color(type.colorValue ?? 0xFF3F51B5);
             final double medY = metrics.topPadding + ((r.unixTimestamp - dayStartUnix) / 86400.0) * chartHeight;
             
-            String txt = _formatUnix(r.unixTimestamp, r.offsetSeconds);
-            if (r.value != null && r.value!.trim().isNotEmpty) {
-              txt = "${type.name}: ${r.value}";
-            }
-            final tp = _getTextPainter(txt, metrics.valueFontSize * 0.95, typeColor.withValues(alpha: 0.9), isBold: r.value != null);
+            final bool hasValue = r.value != null && r.value!.trim().isNotEmpty;
+            final String txt = hasValue ? "${type.name}: ${r.value}" : _formatUnix(r.unixTimestamp, r.offsetSeconds);
+            final tp = _getTextPainter(txt, metrics.valueFontSize, typeColor.withValues(alpha: 0.9), isBold: hasValue);
 
             double textY = medY - metrics.medRadius - 5;
             bool isAbove = true;
@@ -1480,8 +1609,6 @@ class SleepTimelinePainter extends CustomPainter {
   TextPainter _getTextPainter(String text, double fontSize, Color color, {bool isBold = false}) {
     return TextPainter(text: TextSpan(text: text, style: TextStyle(color: color, fontSize: fontSize, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)), textDirection: ui.TextDirection.ltr)..layout();
   }
-
-  void _drawTextWithPainter(Canvas canvas, TextPainter tp, Offset offset) => tp.paint(canvas, offset);
 
   void _drawVerticalTextWithPainter(Canvas canvas, TextPainter tp, Offset pos, {required bool isAbove}) {
     canvas.save();
@@ -1515,10 +1642,12 @@ class _DraftPainter extends CustomPainter {
   final List<Offset> touches; // 현재 화면에 닿아 있는 손가락 위치
   final String label;
   final String? hint;
+  final ChartDateLabelMode dateLabelMode;
 
   _DraftPainter({
     required this.dates,
     required this.dayWidth,
+    required this.dateLabelMode,
     required this.left,
     required this.start,
     required this.end,
@@ -1533,7 +1662,7 @@ class _DraftPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final metrics = _ChartMetrics(dayWidth);
+    final metrics = _ChartMetrics(dayWidth, dateLabelMode);
     const double bottomPadding = 30.0;
     final double chartHeight = size.height - metrics.topPadding - bottomPadding;
 
@@ -1634,7 +1763,7 @@ class _DraftPainter extends CustomPainter {
     const double tailH = 6.0;
     final double bubbleW = tp.width + 20;
     final double bubbleH = tp.height + 12;
-    final double bubbleX = (touch.dx - bubbleW / 2).clamp(4.0, math.max(size.width - bubbleW - 4, 4.0));
+    final double bubbleX = (touch.dx - bubbleW / 2).clamp(left + 4.0, math.max(size.width - bubbleW - 4, left + 4.0));
     final double bubbleY = math.max(touch.dy - fingerGap - tailH - bubbleH, 0.0);
     final bubble = RRect.fromRectAndRadius(Rect.fromLTWH(bubbleX, bubbleY, bubbleW, bubbleH), const Radius.circular(10));
 

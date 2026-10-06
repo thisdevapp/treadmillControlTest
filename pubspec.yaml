@@ -31,6 +31,11 @@ dependencies:
   # Serialization
   json_annotation: ^4.9.0
   flutter_colorpicker: ^1.1.0
+  # Built-in Kotlin(KGP 경고) 대응을 위해 Android 빌드 설정만 수정한 로컬 사본 사용 (원본 5.1.0)
+  # 공식 버전이 Built-in Kotlin을 지원하면 `flutter_web_auth_2: ^<새 버전>`으로 되돌리고 packages/ 폴더 삭제
+  flutter_web_auth_2:
+    path: packages/flutter_web_auth_2
+  flutter_secure_storage: ^11.2.0
 
 dev_dependencies:
   flutter_test:

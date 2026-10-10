@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 릴리즈 빌드에서 Withings API 호출에 필요 (debug/profile 매니페스트에만 있으면 릴리즈 APK는 네트워크 불가) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="sleep_prototype"
         android:name="${applicationName}"

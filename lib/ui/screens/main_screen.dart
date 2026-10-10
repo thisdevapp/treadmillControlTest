@@ -6,8 +6,8 @@ import '../../core/constants/ui_styles.dart'; // 스타일 모듈 추가
 import '../widgets/record_manager.dart';
 import '../widgets/record_type_manager.dart';
 import 'convenience_settings_screen.dart';
+import 'data_settings_screen.dart';
 import 'statistics_screen.dart';
-import 'sync_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final ThemeMode currentThemeMode;
@@ -505,26 +505,18 @@ class _MainScreenState extends State<MainScreen> {
           onLongPressSecondsChanged: _saveLongPressSeconds,
           dateLabelMode: _dateLabelMode,
           onDateLabelModeChanged: _saveDateLabelMode,
+          showAllDetails: _showAllDetails,
+          onShowAllDetailsChanged: _updateShowAllDetails,
         ))),
       ),
       const Divider(),
-      SwitchListTile(
-        title: const Text("통계 그래프 상세 시간 표시"),
-        subtitle: const Text("막대 및 점 옆에 기록된 시간을 항상 노출합니다"),
-        value: _showAllDetails,
-        secondary: const Icon(Icons.segment_rounded),
-        onChanged: _updateShowAllDetails,
-      ),
-      const Divider(),
       ListTile(
-        title: const Text("기록 동기화"),
-        subtitle: const Text("Withings 등 외부 기기의 기록 가져오기"),
-        leading: const Icon(Icons.sync_rounded),
+        title: const Text("데이터"),
+        subtitle: const Text("기록 동기화, 모든 데이터 초기화"),
+        leading: const Icon(Icons.storage_rounded),
         trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SyncScreen(database: widget.database))),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DataSettingsScreen(database: widget.database))),
       ),
-      const Divider(),
-      ListTile(title: const Text("모든 데이터 초기화"), subtitle: const Text("영구 파괴 및 대시보드 리셋"), leading: const Icon(Icons.delete_forever_rounded, color: Colors.redAccent), onTap: () => _confirmResetAllData()),
     ]);
   }
 
@@ -656,23 +648,4 @@ class _MainScreenState extends State<MainScreen> {
       IconButton(icon: const Icon(Icons.add_circle_outline, size: 20), onPressed: () => onChg(val + 1)),
     ])
   ]);
-
-  void _confirmResetAllData() {
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Text("전체 초기화"),
-      content: const Text("모든 설정과 데이터를 초기화하시겠습니까?"),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
-        TextButton(onPressed: () async {
-          await widget.database.transaction(() async {
-            await widget.database.delete(widget.database.customDataRecords).go();
-            await widget.database.delete(widget.database.customDataTypes).go();
-          });
-          final columns = MediaQuery.of(context).size.width > 600 ? 6 : 4;
-          await widget.database.fixDataIntegrity(columns: columns);
-          if (ctx.mounted) Navigator.pop(ctx);
-        }, child: const Text("초기화", style: TextStyle(color: Colors.red))),
-      ],
-    ));
-  }
 }

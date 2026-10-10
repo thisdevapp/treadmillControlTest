@@ -10,6 +10,8 @@ class ConvenienceSettingsScreen extends StatefulWidget {
   final ValueChanged<double> onLongPressSecondsChanged;
   final ChartDateLabelMode dateLabelMode;
   final ValueChanged<ChartDateLabelMode> onDateLabelModeChanged;
+  final bool showAllDetails;
+  final ValueChanged<bool> onShowAllDetailsChanged;
 
   const ConvenienceSettingsScreen({
     super.key,
@@ -19,6 +21,8 @@ class ConvenienceSettingsScreen extends StatefulWidget {
     required this.onLongPressSecondsChanged,
     required this.dateLabelMode,
     required this.onDateLabelModeChanged,
+    required this.showAllDetails,
+    required this.onShowAllDetailsChanged,
   });
 
   @override
@@ -29,6 +33,7 @@ class _ConvenienceSettingsScreenState extends State<ConvenienceSettingsScreen> {
   late ThemeMode _themeMode = widget.themeMode;
   late double _longPressSeconds = widget.longPressSeconds;
   late ChartDateLabelMode _dateLabelMode = widget.dateLabelMode;
+  late bool _showAllDetails = widget.showAllDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -87,6 +92,16 @@ class _ConvenienceSettingsScreenState extends State<ConvenienceSettingsScreen> {
               ),
             ),
           ),
+        ),
+        SwitchListTile(
+          title: const Text("통계 그래프 상세 시간 표시"),
+          subtitle: const Text("막대 및 점 옆에 기록된 시간을 항상 노출합니다"),
+          value: _showAllDetails,
+          secondary: const Icon(Icons.segment_rounded),
+          onChanged: (value) {
+            setState(() => _showAllDetails = value);
+            widget.onShowAllDetailsChanged(value);
+          },
         ),
       ]),
     );

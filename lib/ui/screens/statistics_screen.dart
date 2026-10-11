@@ -12,7 +12,6 @@ import 'package:rxdart/rxdart.dart';
 import '../../database/database.dart';
 import '../widgets/custom_picker_utils.dart';
 import '../widgets/record_manager.dart';
-import '../widgets/record_type_manager.dart';
 
 /// 차트 상단 날짜 표기 방식 (설정 > 편의성 기능 > 차트 보기 > 날짜 표기)
 enum ChartDateLabelMode {
@@ -835,7 +834,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           TextButton(
             onPressed: () async {
               await widget.database.deleteCustomDataRecord(hit.recordId);
-              if (mounted) Navigator.pop(ctx);
+              if (ctx.mounted) Navigator.pop(ctx);
             },
             child: const Text("삭제", style: TextStyle(color: Colors.red)),
           ),

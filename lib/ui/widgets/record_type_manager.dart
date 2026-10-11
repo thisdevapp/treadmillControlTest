@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:drift/drift.dart' show Value;
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import '../../database/database.dart';
-import 'record_manager.dart';
 
 /// 기록 버튼(데이터 타입)의 추가, 수정, 삭제 및 아이콘 선택 UI를 전담하는 모듈
 class RecordTypeManager {
@@ -66,6 +64,8 @@ class RecordTypeManager {
 
             IconData customIcon;
             try {
+              // 사용자가 고른 임의 아이콘이라 상수로 만들 수 없음 (릴리스 빌드는 --no-tree-shake-icons 필요)
+              // ignore: non_const_argument_for_const_parameter
               customIcon = IconData(int.parse(selectedIcon), fontFamily: 'MaterialIcons');
             } catch (e) {
               customIcon = Icons.help_outline;

@@ -11,6 +11,8 @@ class RecordManager {
     if (name != null) {
       final codePoint = int.tryParse(name);
       if (codePoint != null) {
+        // 사용자가 고른 임의 아이콘이라 상수로 만들 수 없음 (릴리스 빌드는 --no-tree-shake-icons 필요)
+        // ignore: non_const_argument_for_const_parameter
         return IconData(codePoint, fontFamily: 'MaterialIcons');
       }
     }
@@ -463,10 +465,10 @@ class RecordManager {
                   await database.addCustomDataRecord(typeId: sleepTypeId, timestamp: startDT, value: val);
                 }
                 
-                // 실제 저장이 완료된 시점에 토스트 띄우기
+                // 실제 저장이 완료된 시점에 토스트 띄우기 (타입 조회까지 끝난 뒤 팝업이 아직 열려 있는지 확인)
+                final types = await database.getCustomDataTypes();
+                final sleepType = types.firstWhere((t) => t.id == sleepTypeId);
                 if (ctx.mounted) {
-                  final types = await database.getCustomDataTypes();
-                  final sleepType = types.firstWhere((t) => t.id == sleepTypeId);
                   onShowToast?.call(sleepType, existingRecordId != null ? "수면 기록이 수정되었습니다." : "수면 기록이 저장되었습니다.");
                   Navigator.pop(ctx);
                 }

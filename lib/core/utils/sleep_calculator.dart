@@ -1,5 +1,3 @@
-import 'package:intl/intl.dart';
-
 class SleepCalculator {
   /// HH:mm 문자열을 분 단위로 변환 (00:00 기준)
   static int? timeToMinutes(String? timeStr) {

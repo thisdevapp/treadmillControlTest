@@ -1,11 +1,10 @@
 import 'dart:io';
-import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:drift/native.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
-import 'package:intl/intl.dart';
 
 part 'database.g.dart';
 
@@ -52,7 +51,7 @@ class AppDatabase extends _$AppDatabase {
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onUpgrade: (m, from, to) async {
-      print("🚀 [DB MIGRATION] Internal: $from -> External: $to");
+      debugPrint("🚀 [DB MIGRATION] Internal: $from -> External: $to");
       
       // 1. 메타데이터 테이블 우선 생성
       await m.createTable(appMetadata);
@@ -77,18 +76,18 @@ class AppDatabase extends _$AppDatabase {
         // 5. DB 파일 내부에 명시적 버전 기록
         await _updateInternalVersion(to);
       }
-      print("✅ [DB MIGRATION] Migration sequence completed.");
+      debugPrint("✅ [DB MIGRATION] Migration sequence completed.");
     },
     onCreate: (m) async {
       await m.createAll();
       await _ensurePresets();
       await _updateInternalVersion(schemaVersion);
-      print("✅ [DB] Database created with Version $schemaVersion");
+      debugPrint("✅ [DB] Database created with Version $schemaVersion");
     },
     beforeOpen: (details) async {
       final internalVersion = await _getInternalVersion();
-      print("📊 [DB STATUS] Physical Version (user_version): ${details.versionNow}");
-      print("📊 [DB STATUS] App Logged Version (metadata): $internalVersion");
+      debugPrint("📊 [DB STATUS] Physical Version (user_version): ${details.versionNow}");
+      debugPrint("📊 [DB STATUS] App Logged Version (metadata): $internalVersion");
     },
   );
 
@@ -386,9 +385,9 @@ LazyDatabase _openConnection() {
       final backupPath = p.join(dbFolder.path, 'db.sqlite.backup');
       try {
         await file.copy(backupPath);
-        print("📦 [DB BACKUP] Existing database file backed up to: $backupPath");
+        debugPrint("📦 [DB BACKUP] Existing database file backed up to: $backupPath");
       } catch (e) {
-        print("⚠️ [DB BACKUP] Failed to create backup: $e");
+        debugPrint("⚠️ [DB BACKUP] Failed to create backup: $e");
       }
     }
 

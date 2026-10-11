@@ -653,13 +653,4 @@ class _MainScreenState extends State<MainScreen> {
       },
     );
   }
-
-  Widget _counterField(String label, int val, Function(int) onChg) => Column(children: [
-    Text(label, style: const TextStyle(fontSize: 10)),
-    Row(children: [
-      IconButton(icon: const Icon(Icons.remove_circle_outline, size: 20), onPressed: () => onChg(val - 1)),
-      Text("$val", style: const TextStyle(fontWeight: FontWeight.bold)),
-      IconButton(icon: const Icon(Icons.add_circle_outline, size: 20), onPressed: () => onChg(val + 1)),
-    ])
-  ]);
 }

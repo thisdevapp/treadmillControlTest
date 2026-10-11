@@ -29,6 +29,7 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   double _longPressSeconds = 4.0;
   bool _showAllDetails = false; // 통계 상세 표시 설정 상태 추가
+  double _undoToastSeconds = RecordManager.undoToastSeconds;
   ChartDateLabelMode _dateLabelMode = ChartDateLabelMode.dynamic;
   bool _isEditMode = false;
 
@@ -59,6 +60,8 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _longPressSeconds = prefs.getDouble('long_press_seconds') ?? 4.0;
       _showAllDetails = prefs.getBool('statistics_show_details') ?? false;
+      _undoToastSeconds = prefs.getDouble('undo_toast_seconds') ?? RecordManager.undoToastSeconds;
+      RecordManager.undoToastSeconds = _undoToastSeconds;
       final int labelModeIndex = prefs.getInt('chart_date_label_mode') ?? 0;
       _dateLabelMode = ChartDateLabelMode.values[labelModeIndex.clamp(0, ChartDateLabelMode.values.length - 1)];
     });
@@ -77,6 +80,15 @@ class _MainScreenState extends State<MainScreen> {
     await prefs.setDouble('long_press_seconds', value);
     setState(() {
       _longPressSeconds = value;
+    });
+  }
+
+  Future<void> _saveUndoToastSeconds(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('undo_toast_seconds', value);
+    RecordManager.undoToastSeconds = value;
+    setState(() {
+      _undoToastSeconds = value;
     });
   }
 
@@ -495,7 +507,7 @@ class _MainScreenState extends State<MainScreen> {
       const Padding(padding: EdgeInsets.all(16.0), child: Text("환경 설정", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
       ListTile(
         title: const Text("편의성 기능"),
-        subtitle: const Text("테마, 꾹 누르기 시간, 차트 보기"),
+        subtitle: const Text("테마, 꾹 누르기 시간, 수정취소 알림, 차트 보기"),
         leading: const Icon(Icons.tune_rounded),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ConvenienceSettingsScreen(
@@ -503,6 +515,8 @@ class _MainScreenState extends State<MainScreen> {
           onThemeChanged: widget.onThemeChanged,
           longPressSeconds: _longPressSeconds,
           onLongPressSecondsChanged: _saveLongPressSeconds,
+          undoToastSeconds: _undoToastSeconds,
+          onUndoToastSecondsChanged: _saveUndoToastSeconds,
           dateLabelMode: _dateLabelMode,
           onDateLabelModeChanged: _saveDateLabelMode,
           showAllDetails: _showAllDetails,

@@ -919,36 +919,40 @@ class _Drop {
 }
 
 /// 기존 기록을 꾹 누른 상태 (그대로 떼면 수정/삭제 팝업, 끌면 시간 조정)
+/// 조정 가능한 지점을 잡았으면 신규 생성과 같은 점/막대 편집(_draftStart/_draftEnd)으로 진행
 class _HeldRecord {
   final _HitInfo hit;
   final CustomDataRecord record;
   final Offset pressPos; // 처음 누른 위치
-  final Offset grabOffset; // 손가락 → 조정 지점(점 중심 / 막대 끝) 거리. 잡은 위치와 상관없이 지점이 손가락을 그대로 따라가도록 유지
   final int origStartUnix;
   final int origEndUnix; // 점 기록이면 origStartUnix와 같음
-  int startUnix;
-  int endUnix;
   bool adjusting = false; // 드래그가 시작되어 시간 조정 모드로 전환됨
+
+  // 편집 시작 시점의 점 위치 (첫 손가락이 잡은 쪽 / 반대쪽). 움직이지 않은 쪽은 원래 시각을 초 단위까지 그대로 저장
+  final _DraftAnchor? origPrimary;
+  final _DraftAnchor? origSecondary;
+  final bool primaryIsStart; // 첫 손가락이 잡은 쪽이 시작(취침) 시각인지
 
   _HeldRecord({
     required this.hit,
     required this.record,
     required this.pressPos,
-    required this.grabOffset,
     required this.origStartUnix,
     required this.origEndUnix,
-  })  : startUnix = origStartUnix,
-        endUnix = origEndUnix;
+    this.origPrimary,
+    this.origSecondary,
+    this.primaryIsStart = true,
+  });
 
   bool get isPoint => hit.edge == _AdjustEdge.point;
-  bool get changed => startUnix != origStartUnix || endUnix != origEndUnix;
 
-  /// 미리보기용으로 조정 중인 시간을 반영한 기록
-  CustomDataRecord preview() =>
-      isPoint ? record.copyWith(unixTimestamp: startUnix) : record.copyWith(unixTimestamp: startUnix, value: Value(savedValue));
+  /// 조정된 시간을 반영한 기록
+  CustomDataRecord edited(int startUnix, int endUnix) => isPoint
+      ? record.copyWith(unixTimestamp: startUnix)
+      : record.copyWith(unixTimestamp: startUnix, value: Value(savedValue(endUnix)));
 
   /// 저장할 value: 수면 기록은 JSON의 endUnix만 바꾸고 메모 등 나머지 필드는 유지
-  String get savedValue {
+  String savedValue(int endUnix) {
     if (isPoint) return record.value ?? '';
     Map<String, dynamic> map = {};
     try {
@@ -979,12 +983,18 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
   _DraftAnchor? _draftEnd; // 두 번째 손가락 (라인으로 전환 시)
   _Drop? _startDrop;
   _Drop? _endDrop;
+  // 손가락 → 점 중심 거리. 잡은 위치와 상관없이 점이 손가락을 그대로 따라가도록 유지
+  Offset _primaryGrab = Offset.zero;
+  Offset _secondaryGrab = Offset.zero;
+  static const double _regrabRadius = 40.0; // 손을 뗀 점을 다시 잡을 수 있는 거리
   late final Ticker _dropTicker;
   Duration _lastDropTick = Duration.zero;
 
   // 기존 기록 꾹 누르기 → 그대로 떼면 수정/삭제 팝업, 끌면 시간 조정
   static const double _adjustSlop = 8.0; // 꾹 누른 뒤 이만큼 움직이면 시간 조정 모드로 전환
   _HeldRecord? _held;
+  // 저장한 시간 조정이 스트림으로 다시 들어올 때까지 차트에 대신 보여줄 기록 (이전 위치가 깜빡이지 않도록)
+  CustomDataRecord? _pendingEdit;
 
   @override
   void initState() {
@@ -1059,11 +1069,26 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
               height: constraints.maxHeight,
             );
 
-            // 시간 조정 중인 기록은 조정된 시간으로 미리 보여줌
+            // 시간 조정 중인 기록은 점/막대 편집 오버레이로 대신 그림
             final held = _held;
-            final List<CustomDataRecord> paintRecords = held != null && held.adjusting
-                ? [for (final r in records) r.id == held.record.id ? held.preview() : r]
-                : records;
+            final bool editing = held != null && _draftStart != null;
+            final pending = _pendingEdit;
+            if (pending != null) {
+              final current = records.where((r) => r.id == pending.id).firstOrNull;
+              if (current == null || (current.unixTimestamp == pending.unixTimestamp && current.value == pending.value)) {
+                _pendingEdit = null;
+              }
+            }
+            final List<CustomDataRecord> paintRecords = editing
+                ? [for (final r in records) if (r.id != held.record.id) r]
+                : _pendingEdit != null
+                    ? [for (final r in records) r.id == pending!.id ? pending : r]
+                    : records;
+            final Color draftColor = held != null
+                ? Color(types.where((t) => t.id == held.record.typeId).firstOrNull?.colorValue ?? 0xFF3F51B5)
+                : _draftEnd != null
+                    ? Color(RecordManager.findSleepType(types)?.colorValue ?? 0xFF4CAF50)
+                    : Theme.of(context).colorScheme.primary;
 
             // GestureDetector 대신 Listener를 사용하여 멀티 터치(두 번째 손가락)를 직접 추적
             return Listener(
@@ -1084,32 +1109,32 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
                   yAxisWidth: widget.yAxisWidth,
                   dateLabelMode: widget.dateLabelMode,
                 ),
-                foregroundPainter: held != null
-                    ? _HeldPainter(
+                foregroundPainter: _draftStart != null && _startDrop != null
+                    ? _DraftPainter(
+                        dates: pageDates,
+                        dayWidth: dayWidth,
+                        dateLabelMode: widget.dateLabelMode,
                         left: widget.yAxisWidth,
-                        touch: _lastPrimaryPos ?? held.pressPos,
-                        color: Color(types.where((t) => t.id == held.record.typeId).firstOrNull?.colorValue ?? 0xFF3F51B5),
+                        start: _draftStart!,
+                        end: _draftEnd,
+                        startDrop: _startDrop!,
+                        endDrop: _endDrop,
+                        color: draftColor,
                         isDarkMode: isDarkMode,
-                        label: _heldLabel(held),
-                        hint: _heldHint(held),
+                        touches: [?_lastPrimaryPos, ?_secondaryPos],
+                        label: _draftLabel(pageDates),
+                        hint: _draftHint(),
                       )
-                    : _draftStart == null || _startDrop == null ? null : _DraftPainter(
-                  dates: pageDates,
-                  dayWidth: dayWidth,
-                  dateLabelMode: widget.dateLabelMode,
-                  left: widget.yAxisWidth,
-                  start: _draftStart!,
-                  end: _draftEnd,
-                  startDrop: _startDrop!,
-                  endDrop: _endDrop,
-                  color: _draftEnd != null
-                      ? Color(RecordManager.findSleepType(types)?.colorValue ?? 0xFF4CAF50)
-                      : Theme.of(context).colorScheme.primary,
-                  isDarkMode: isDarkMode,
-                  touches: [?_lastPrimaryPos, ?_secondaryPos],
-                  label: _draftLabel(pageDates),
-                  hint: _draftEnd == null ? "옆에 손가락을 하나 더 대면 기간으로 전환" : null,
-                ),
+                    : held != null
+                        ? _HeldPainter(
+                            left: widget.yAxisWidth,
+                            touch: _lastPrimaryPos ?? held.pressPos,
+                            color: draftColor,
+                            isDarkMode: isDarkMode,
+                            label: _sleepPeriodText(held.record, held.origStartUnix, held.origEndUnix),
+                            hint: "떼면 수정 메뉴 · 막대 끝을 잡고 끌면 시간 조정",
+                          )
+                        : null,
               ),
             );
           },
@@ -1125,9 +1150,13 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     final frame = _frame;
     if (frame == null) return;
 
-    // 생성 중: 두 번째 손가락이면 라인 타입으로 전환 시도
+    // 점/기간 지정 중: 기간이면 손을 뗀 쪽 점을 다시 잡고, 점이면 두 번째 손가락으로 기간 전환 시도
     if (_draftStart != null) {
-      _tryConvertToLine(e, frame);
+      if (_draftEnd != null) {
+        _tryRegrab(e, frame);
+      } else if (_held == null) {
+        _tryConvertToLine(e, frame);
+      }
       return;
     }
 
@@ -1159,23 +1188,33 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     if (frame == null) return;
 
     if (_draftStart != null) {
+      final held = _held;
       if (e.pointer == _primaryPointer) {
+        // 기존 기록은 살짝 움직인 정도로는 시간 조정으로 전환하지 않음 (그대로 떼면 수정 메뉴)
+        if (held != null && !held.adjusting && (e.localPosition - held.pressPos).distance <= _adjustSlop) {
+          setState(() => _lastPrimaryPos = e.localPosition);
+          return;
+        }
+        final anchor = _anchorAt(e.localPosition + _primaryGrab, frame, nearDayIdx: _draftEnd?.dayIdx, allowDayEnd: _draftEnd != null);
+        _onEditAnchorMoved(_draftStart!, anchor);
         setState(() {
           _lastPrimaryPos = e.localPosition;
-          _draftStart = _anchorAt(e.localPosition, frame, nearDayIdx: _draftEnd?.dayIdx, allowDayEnd: _draftEnd != null);
+          _draftStart = anchor;
         });
       } else if (e.pointer == _secondaryPointer) {
+        final anchor = _anchorAt(e.localPosition + _secondaryGrab, frame, nearDayIdx: _draftStart!.dayIdx, allowDayEnd: true);
+        _onEditAnchorMoved(_draftEnd!, anchor);
         setState(() {
           _secondaryPos = e.localPosition;
-          _draftEnd = _anchorAt(e.localPosition, frame, nearDayIdx: _draftStart!.dayIdx, allowDayEnd: true);
+          _draftEnd = anchor;
         });
       }
       return;
     }
 
-    final held = _held;
-    if (held != null) {
-      if (e.pointer == _primaryPointer) _moveHeld(held, e.localPosition, frame);
+    // 수면 막대 가운데를 잡은 경우: 조정할 지점이 없으므로 움직여도 팝업 대기 유지
+    if (_held != null) {
+      if (e.pointer == _primaryPointer) setState(() => _lastPrimaryPos = e.localPosition);
       return;
     }
 
@@ -1185,6 +1224,14 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     if ((e.localPosition - _tapDownPos!).distance > slop) {
       _cancelPendingPress();
     }
+  }
+
+  /// 기존 기록 편집 중 점이 움직이면 시간 조정 모드로 전환하고 칸마다 진동
+  void _onEditAnchorMoved(_DraftAnchor from, _DraftAnchor to) {
+    final held = _held;
+    if (held == null || from == to) return;
+    held.adjusting = true;
+    HapticFeedback.selectionClick();
   }
 
   void _handlePointerEnd(PointerEvent e) {
@@ -1198,20 +1245,29 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
       } else {
         return;
       }
-      // 모든 손가락을 떼면 시간 지정 완료
+      // 모든 손가락을 떼면 시간 지정 완료 (한쪽만 떼면 그 점은 그 자리에 두고 다시 잡을 수 있음)
       if (_primaryPointer == null && _secondaryPointer == null) {
+        final held = _held;
         if (e is PointerCancelEvent) {
           _clearDraft();
+        } else if (held != null) {
+          _finishEdit(held);
         } else {
           _finishDraft();
         }
+      } else {
+        setState(() {});
       }
       return;
     }
 
     final held = _held;
     if (held != null) {
-      if (e.pointer == _primaryPointer) _releaseHeld(held, canceled: e is PointerCancelEvent);
+      if (e.pointer == _primaryPointer) {
+        // 움직이지 않고 떼면 기존 수정/삭제 팝업
+        _clearDraft();
+        if (e is! PointerCancelEvent) widget.onExecuteLongPress(held.hit);
+      }
       return;
     }
 
@@ -1238,133 +1294,163 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
         end = (json.decode(record.value!)['endUnix'] as int?) ?? start;
       } catch (_) {}
     }
-    // 조정 지점의 현재 화면 위치 (수면 막대 가운데를 잡은 경우는 조정하지 않으므로 사용되지 않음)
-    final Offset edgePos = _unixOffset(hit.edge == _AdjustEdge.sleepEnd ? end : start, hit.dayIdx, frame);
 
     _tapDownPos = null;
     HapticFeedback.mediumImpact();
-    setState(() {
-      _held = _HeldRecord(
-        hit: hit,
-        record: record,
-        pressPos: pressPos,
-        grabOffset: edgePos - pressPos,
-        origStartUnix: start,
-        origEndUnix: end,
-      );
-    });
+    final edge = hit.edge;
+    if (edge == null) {
+      // 수면 막대 가운데: 조정할 지점이 없으므로 떼면 수정 메뉴만
+      setState(() => _held = _HeldRecord(hit: hit, record: record, pressPos: pressPos, origStartUnix: start, origEndUnix: end));
+    } else {
+      // 조정할 지점을 잡았으면 신규 생성과 같은 점/막대 편집으로 진행.
+      // 첫 손가락은 잡은 쪽 점, 막대의 반대쪽 점은 손가락 하나를 더 대서 함께 조정할 수 있음
+      final bool primaryIsStart = edge != _AdjustEdge.sleepEnd;
+      final primary = _anchorOfUnix(primaryIsStart ? start : end, frame, isEnd: !primaryIsStart);
+      final secondary = edge == _AdjustEdge.point ? null : _anchorOfUnix(primaryIsStart ? end : start, frame, isEnd: primaryIsStart);
+      setState(() {
+        _held = _HeldRecord(
+          hit: hit,
+          record: record,
+          pressPos: pressPos,
+          origStartUnix: start,
+          origEndUnix: end,
+          origPrimary: primary,
+          origSecondary: secondary,
+          primaryIsStart: primaryIsStart,
+        );
+        _draftStart = primary;
+        _draftEnd = secondary;
+        _primaryGrab = _anchorOffset(primary, frame) - pressPos;
+        _secondaryGrab = Offset.zero;
+        // 이미 있던 기록이므로 톡 튀어나오지 않고 제 크기에서 시작해, 잡은 점만 부드럽게 커짐
+        _startDrop = _Drop(_anchorOffset(primary, frame))
+          ..age = 1
+          ..grow = 1;
+        _endDrop = secondary == null
+            ? null
+            : (_Drop(_anchorOffset(secondary, frame))
+              ..age = 1
+              ..grow = 1);
+      });
+      _startDropTicker();
+    }
     // 드래그 중 페이지가 넘어가지 않도록 잠금
     widget.onDraftingChanged(true);
   }
 
-  void _moveHeld(_HeldRecord held, Offset pos, _ChartFrame frame) {
-    final edge = held.hit.edge;
-    if (!held.adjusting) {
-      // 수면 막대 가운데는 조정할 지점이 없으므로 움직여도 팝업 대기 유지
-      if (edge == null || (pos - held.pressPos).distance <= _adjustSlop) {
-        setState(() => _lastPrimaryPos = pos);
-        return;
-      }
-      held.adjusting = true;
-      HapticFeedback.selectionClick();
+  Future<void> _finishEdit(_HeldRecord held) async {
+    final frame = _frame;
+    final primary = _draftStart;
+    final secondary = _draftEnd;
+    if (frame == null || primary == null) {
+      _clearDraft();
+      return;
     }
-
-    final anchor = _anchorAt(
-      pos + held.grabOffset,
-      frame,
-      // 수면 막대 끝은 원래 칸과 바로 옆 칸까지만 (자정을 넘기는 수면)
-      nearDayIdx: edge == _AdjustEdge.point ? null : held.hit.dayIdx,
-      allowDayEnd: edge == _AdjustEdge.sleepEnd,
-    );
-    final int unix = _anchorTime(anchor, frame.dates).millisecondsSinceEpoch ~/ 1000;
-    const int minSleep = _snapMinutes * 60;
-    int start = held.startUnix, end = held.endUnix;
-    switch (edge!) {
-      case _AdjustEdge.point:
-        start = end = unix;
-      case _AdjustEdge.sleepStart:
-        start = math.min(unix, held.endUnix - minSleep);
-      case _AdjustEdge.sleepEnd:
-        end = math.max(unix, held.startUnix + minSleep);
-    }
-    if (start != held.startUnix || end != held.endUnix) HapticFeedback.selectionClick();
-    setState(() {
-      _lastPrimaryPos = pos;
-      held.startUnix = start;
-      held.endUnix = end;
-    });
-  }
-
-  Future<void> _releaseHeld(_HeldRecord held, {required bool canceled}) async {
-    _primaryPointer = null;
-    _lastPrimaryPos = null;
-    widget.onDraftingChanged(false);
-    if (mounted) setState(() => _held = null);
-    if (canceled) return;
-
     if (!held.adjusting) {
       // 움직이지 않고 떼면 기존 수정/삭제 팝업
+      _clearDraft();
       widget.onExecuteLongPress(held.hit);
       return;
     }
-    if (!held.changed) return;
 
-    await widget.database.updateCustomDataRecord(
-      held.record.id,
-      timestamp: DateTime.fromMillisecondsSinceEpoch(held.startUnix * 1000),
-      value: held.savedValue,
-    );
+    // 움직이지 않은 점은 원래 시각을 그대로 사용
+    int unixOf(_DraftAnchor a, _DraftAnchor? orig, int origUnix) =>
+        a == orig ? origUnix : _anchorTime(a, frame.dates).millisecondsSinceEpoch ~/ 1000;
+    final int p = unixOf(primary, held.origPrimary, held.primaryIsStart ? held.origStartUnix : held.origEndUnix);
+    int start = p, end = p;
+    if (secondary != null) {
+      final int s = unixOf(secondary, held.origSecondary, held.primaryIsStart ? held.origEndUnix : held.origStartUnix);
+      // 점끼리 순서가 바뀌어도 앞쪽이 취침 시각
+      start = math.min(p, s);
+      end = math.max(math.max(p, s), start + _snapMinutes * 60);
+    }
+
+    final bool changed = start != held.origStartUnix || end != held.origEndUnix;
+    if (changed) _pendingEdit = held.edited(start, end);
+    _clearDraft();
+    if (!changed) return;
+
+    try {
+      await widget.database.updateCustomDataRecord(
+        held.record.id,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(start * 1000),
+        value: held.savedValue(end),
+      );
+    } catch (_) {
+      if (mounted) setState(() => _pendingEdit = null);
+      rethrow;
+    }
     if (!mounted) return;
     final type = _frame?.types.where((t) => t.id == held.record.typeId).firstOrNull;
     if (type != null) {
-      RecordManager.showRecordToast(
+      // 실수로 끌었을 때 바로 되돌릴 수 있도록 변경 전 → 후와 수정취소 버튼을 상단에 표시
+      final r = held.record;
+      RecordManager.showUndoToast(
         context,
         type,
-        held.isPoint ? "기록 시각 변경: ${_recordTime(held.startUnix, held.record)}" : "수면 시간 변경: ${_sleepPeriodText(held)}",
+        held.isPoint
+            ? "기록 시각 변경\n${_recordTime(held.origStartUnix, r)} → ${_recordTime(start, r)}"
+            : "수면 시간 변경\n${_recordTime(held.origStartUnix, r)} ~ ${_recordTime(held.origEndUnix, r)}"
+                " → ${_sleepPeriodText(r, start, end)}",
+        actionLabel: "수정취소",
+        onAction: () => _undoEdit(r, type),
       );
     }
+  }
+
+  /// 시간 조정 전 기록으로 되돌림
+  Future<void> _undoEdit(CustomDataRecord original, CustomDataType type) async {
+    final database = widget.database;
+    if (mounted) setState(() => _pendingEdit = original);
+    try {
+      await database.updateCustomDataRecord(
+        original.id,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(original.unixTimestamp * 1000),
+        value: original.value,
+      );
+    } catch (_) {
+      if (mounted) setState(() => _pendingEdit = null);
+      rethrow;
+    }
+    if (!mounted) return;
+    RecordManager.showRecordToast(context, type, "수정을 취소했습니다");
   }
 
   /// 기록 시각 표시 (차트 라벨과 같이 기록에 저장된 시간대 기준)
   String _recordTime(int unix, CustomDataRecord r) =>
       DateFormat('HH:mm').format(DateTime.fromMillisecondsSinceEpoch((unix + r.offsetSeconds) * 1000, isUtc: true));
 
-  String _sleepPeriodText(_HeldRecord held) {
-    final d = held.endUnix - held.startUnix;
-    return "${_recordTime(held.startUnix, held.record)} ~ ${_recordTime(held.endUnix, held.record)}"
+  String _sleepPeriodText(CustomDataRecord r, int start, int end) {
+    final d = end - start;
+    return "${_recordTime(start, r)} ~ ${_recordTime(end, r)}"
         " (${d ~/ 3600}시간 ${(d % 3600) ~/ 60}분)";
   }
 
-  String _heldLabel(_HeldRecord held) {
-    if (held.isPoint) return "시각 ${_recordTime(held.startUnix, held.record)}";
-    if (held.adjusting) {
-      return held.hit.edge == _AdjustEdge.sleepStart
-          ? "취침 ${_recordTime(held.startUnix, held.record)}"
-          : "기상 ${_recordTime(held.endUnix, held.record)}";
+  String? _draftHint() {
+    final held = _held;
+    if (held != null && !held.adjusting) {
+      return switch (held.hit.edge) {
+        _AdjustEdge.sleepStart => "떼면 수정 메뉴 · 끌면 취침 시각 조정",
+        _AdjustEdge.sleepEnd => "떼면 수정 메뉴 · 끌면 기상 시각 조정",
+        _ => "떼면 수정 메뉴 · 끌면 시간 조정",
+      };
     }
-    return _sleepPeriodText(held);
+    if (_draftEnd == null) return held == null ? "옆에 손가락을 하나 더 대면 기간으로 전환" : null;
+    if (_primaryPointer == null || _secondaryPointer == null) return "반대쪽 점을 눌러 함께 조정";
+    return null;
   }
 
-  String? _heldHint(_HeldRecord held) {
-    if (held.adjusting) return held.isPoint ? null : _sleepPeriodText(held);
-    return switch (held.hit.edge) {
-      null => "떼면 수정 메뉴 · 막대 끝을 잡고 끌면 시간 조정",
-      _AdjustEdge.point => "떼면 수정 메뉴 · 끌면 시간 조정",
-      _AdjustEdge.sleepStart => "떼면 수정 메뉴 · 끌면 취침 시각 조정",
-      _AdjustEdge.sleepEnd => "떼면 수정 메뉴 · 끌면 기상 시각 조정",
-    };
-  }
-
-  /// [dayIdx] 칸 기준으로 [unix] 시각의 화면 위치
-  Offset _unixOffset(int unix, int dayIdx, _ChartFrame frame) {
-    final metrics = _ChartMetrics(frame.dayWidth, widget.dateLabelMode);
-    const double bottomPadding = 30.0;
-    final double chartHeight = frame.height - metrics.topPadding - bottomPadding;
-    final int dayStartUnix = frame.dates[dayIdx].millisecondsSinceEpoch ~/ 1000;
-    return Offset(
-      widget.yAxisWidth + dayIdx * frame.dayWidth + frame.dayWidth / 2,
-      metrics.topPadding + ((unix - dayStartUnix) / 86400.0) * chartHeight,
-    );
+  /// [unix] 시각의 점 위치 (현재 페이지 첫 날짜 기준 칸). 막대 끝이 정확히 자정이면 앞 칸의 24:00으로 둠
+  _DraftAnchor _anchorOfUnix(int unix, _ChartFrame frame, {required bool isEnd}) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(unix * 1000);
+    final d0 = frame.dates.first;
+    int dayIdx = (DateTime(dt.year, dt.month, dt.day).difference(DateTime(d0.year, d0.month, d0.day)).inHours / 24).round();
+    int minutes = dt.hour * 60 + dt.minute;
+    if (isEnd && minutes == 0 && dt.second == 0) {
+      dayIdx -= 1;
+      minutes = 1440;
+    }
+    return _DraftAnchor(dayIdx, minutes);
   }
 
   void _cancelPendingPress() {
@@ -1383,13 +1469,19 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     setState(() {
       _draftStart = _anchorAt(pos, frame, allowDayEnd: false);
       _draftEnd = null;
+      _primaryGrab = Offset.zero;
+      _secondaryGrab = Offset.zero;
       _startDrop = _Drop(_anchorOffset(_draftStart!, frame));
       _endDrop = null;
     });
-    _lastDropTick = Duration.zero;
-    if (!_dropTicker.isActive) _dropTicker.start();
+    _startDropTicker();
     // 드래그 중 페이지가 넘어가지 않도록 잠금
     widget.onDraftingChanged(true);
+  }
+
+  void _startDropTicker() {
+    _lastDropTick = Duration.zero;
+    if (!_dropTicker.isActive) _dropTicker.start();
   }
 
   void _tryConvertToLine(PointerDownEvent e, _ChartFrame frame) {
@@ -1401,9 +1493,31 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     setState(() {
       _secondaryPointer = e.pointer;
       _secondaryPos = e.localPosition;
+      _secondaryGrab = Offset.zero;
       _draftEnd = _anchorAt(e.localPosition, frame, nearDayIdx: _draftStart!.dayIdx, allowDayEnd: true);
       // 두 번째 물방울은 첫 물방울에서 갈라져 나와 흘러가도록 같은 위치에서 시작
       _endDrop = _Drop(_startDrop?.head ?? _anchorOffset(_draftEnd!, frame));
+    });
+  }
+
+  /// 기간 지정 중 손가락이 닿아 있지 않은 쪽 점 근처를 누르면 그 점을 다시 잡아 이어서 조정
+  void _tryRegrab(PointerDownEvent e, _ChartFrame frame) {
+    final bool primaryFree = _primaryPointer == null;
+    if (!primaryFree && _secondaryPointer != null) return;
+    final Offset dotPos = _anchorOffset(primaryFree ? _draftStart! : _draftEnd!, frame);
+    if ((e.localPosition - dotPos).distance > _regrabRadius) return;
+
+    HapticFeedback.mediumImpact();
+    setState(() {
+      if (primaryFree) {
+        _primaryPointer = e.pointer;
+        _lastPrimaryPos = e.localPosition;
+        _primaryGrab = dotPos - e.localPosition;
+      } else {
+        _secondaryPointer = e.pointer;
+        _secondaryPos = e.localPosition;
+        _secondaryGrab = dotPos - e.localPosition;
+      }
     });
   }
 
@@ -1493,11 +1607,14 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     if (mounted) {
       _dropTicker.stop();
       setState(() {
+        _held = null;
         _draftStart = null;
         _draftEnd = null;
         _startDrop = null;
         _endDrop = null;
       });
+    } else {
+      _held = null;
     }
   }
 
@@ -1526,8 +1643,9 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
   }
 
   DateTime _anchorTime(_DraftAnchor a, List<DateTime> dates) {
-    final d = dates[a.dayIdx];
-    return DateTime(d.year, d.month, d.day, 0, a.minutes);
+    // 기존 기록 편집 시 반대쪽 끝이 페이지 밖 칸(-1 등)일 수 있으므로 첫 날짜 기준으로 계산
+    final d = dates.first;
+    return DateTime(d.year, d.month, d.day + a.dayIdx, 0, a.minutes);
   }
 
   String _draftLabel(List<DateTime> dates) {
@@ -1981,7 +2099,9 @@ class _DraftPainter extends CustomPainter {
       // 많이 늘어날수록 꼬리가 가늘어짐
       final double tailR = r * (0.6 - 0.2 * (dist / (r * 3)).clamp(0.0, 1.0));
       canvas.drawCircle(d.tail, tailR, dotPaint);
-      final neck = _dropNeck(d.head, r, d.tail, tailR);
+      // 막대와 같은 다리 곡선으로 잇되, 늘어날수록 허리가 잘록해짐
+      final double stretch = ((dist - (r + tailR) * 0.6) / (r * 2.5)).clamp(0.0, 1.0);
+      final neck = _bridge(d.head, r, d.tail, tailR, tailR * (1 - 0.3 * stretch));
       if (neck != null) canvas.drawPath(neck, dotPaint);
     }
 
@@ -1995,33 +2115,39 @@ class _DraftPainter extends CustomPainter {
       final _Drop bDrop = startFirst ? endDrop : startDrop;
       // 막대도 점과 같은 불투명 색으로 그려 점-막대가 한 덩어리로 보이도록 함
       final double barR = metrics.barWidth / 2;
-      final radius = Radius.circular(barR);
 
-      // 막대 끝은 물방울 꼬리처럼 머리를 한 박자 늦게 따라오고,
-      // 머리(점)와는 베지어 곡선으로 부드럽게 좁아지며 막대 옆선에 이어짐
-      void drawBar(int dayIdx, double fromY, double toY, List<(_Drop, double, double)> ends) {
-        final x = xOf(dayIdx);
-        if (toY > fromY) {
-          canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(x - barR, fromY, x + barR, toY), radius), dotPaint);
-        }
-        for (final (drop, y, dirY) in ends) {
-          // 이음부 길이: 점 크기에 비례하되 막대 길이의 절반을 넘지 않도록 제한
-          final double r = radiusOf(drop);
-          final double len = math.min(r * 1.5, (toY - fromY).abs() / 2);
-          final fillet = _barFillet(drop.head, r, x, y + dirY * len, barR, dirY);
-          if (fillet != null) canvas.drawPath(fillet, dotPaint);
-        }
+      // 가장 좁은 가운데 부분의 반폭 (굵기가 막대 두께의 2/3)
+      final double minWaist = barR * 2 / 3;
+
+      // 점과 점을 옆선마다 하나의 베지어 곡선으로 이음.
+      // 점 쪽에서 완만하게 좁아져 가운데에서 가장 가늘고 다시 넓어지는 모래시계 모양
+      void drawBridge(Offset p, double pr, Offset q, double qr) {
+        final double d = (q - p).distance;
+        // 두 점이 가까울수록 허리를 점 크기 쪽으로 키워 자연스럽게 합쳐지도록 함
+        final double close = 1 - ((d - (pr + qr)) / (pr + qr)).clamp(0.0, 1.0);
+        final double waist = math.max(minWaist, minWaist + (math.min(pr, qr) - minWaist) * close);
+        // 점이 막 생겨나 허리보다 작을 때도 끝이 둥글게 덮이도록
+        if (pr <= waist) canvas.drawCircle(p, waist, dotPaint);
+        if (qr <= waist) canvas.drawCircle(q, waist, dotPaint);
+        final path = _bridge(p, pr, q, qr, waist);
+        if (path != null) canvas.drawPath(path, dotPaint);
       }
 
-      final double aY = aDrop.tail.dy;
-      final double bY = bDrop.tail.dy;
+      // 자정에서 잘린 쪽: 점에서 잘린 끝까지 가운데 굵기로 좁아지기만 하고 끝은 둥글게 마무리
+      void drawCutBridge(Offset p, double pr, Offset cap) {
+        canvas.drawCircle(cap, minWaist, dotPaint);
+        final path = _bridge(p, pr, cap, minWaist, minWaist, taperToB: true);
+        if (path != null) canvas.drawPath(path, dotPaint);
+      }
+
+      final double aR = radiusOf(aDrop);
+      final double bR = radiusOf(bDrop);
       if (a.dayIdx == b.dayIdx) {
-        final bool aTop = aY <= bY;
-        drawBar(a.dayIdx, math.min(aY, bY), math.max(aY, bY), [(aDrop, aY, aTop ? 1.0 : -1.0), (bDrop, bY, aTop ? -1.0 : 1.0)]);
+        drawBridge(aDrop.head, aR, bDrop.head, bR);
       } else {
         // 자정을 넘기는 기간: 앞 칸은 24:00까지, 뒤 칸은 00:00부터
-        drawBar(a.dayIdx, aY, yOf(1440), [(aDrop, aY, 1.0)]);
-        drawBar(b.dayIdx, yOf(0), bY, [(bDrop, bY, -1.0)]);
+        drawCutBridge(aDrop.head, aR, Offset(xOf(a.dayIdx), yOf(1440) - minWaist));
+        drawCutBridge(bDrop.head, bR, Offset(xOf(b.dayIdx), yOf(0) + minWaist));
       }
       // 점 하나일 때와 동일한 물방울 이펙트 (머리 + 늘어나는 꼬리)
       drawDrop(endDrop);
@@ -2124,81 +2250,53 @@ class _HeldPainter extends CustomPainter {
       oldDelegate.color != color || oldDelegate.isDarkMode != isDarkMode || oldDelegate.left != left;
 }
 
-/// 점(head, r)에서 막대(x 중심, 반폭 barR)로 부드럽게 좁아지는 이음부 경로.
-/// 점 원 위의 양쪽 접점에서 원의 접선 방향으로 출발해, 막대 안쪽 joinY 지점의 막대 옆선에
-/// 세로 방향으로 도착하는 3차 베지어라 점·이음부·막대 경계가 꺾이지 않음.
-/// dirY: 막대가 점에서 뻗어 나가는 방향 (아래 +1, 위 -1)
-Path? _barFillet(Offset head, double r, double x, double joinY, double barR, double dirY) {
-  // 점이 막대보다 충분히 크지 않으면 좁아질 구간이 없음
-  if (r <= barR * 1.02) return null;
-
-  final Offset join = Offset(x, joinY);
-  final Offset delta = join - head;
+/// 두 원(a, ra)·(b, rb)을 잇는 잘록한 다리 경로. 막대와 물방울 목이 함께 사용함.
+/// 각 옆선은 a의 접점에서 b의 접점까지 이어지는 3차 베지어 하나라 중간에 이음매나 직선 구간이 없고,
+/// 양 끝은 원의 접선 방향으로 출발/도착해 원·다리 경계도 꺾이지 않음.
+/// 제어점을 접점 사이 거리의 1/3 지점에 두어 폭이 포물선처럼 변하고, 가운데 폭이 정확히 반폭 waist가 되도록 함.
+/// taperToB: b가 막대의 잘린 끝(자정)이라 b 쪽으로 갈수록 waist까지 좁아지기만 하는 반쪽 모양
+/// 원이 waist보다 작으면 반지름 waist인 원으로 취급하므로 호출 측에서 덮어 그려야 함
+Path? _bridge(Offset a, double ra, Offset b, double rb, double waist, {bool taperToB = false}) {
+  final Offset delta = b - a;
   final double d = delta.distance;
-  final Offset dir = d < 0.5 ? Offset(0, dirY) : delta / d;
-  // 오른쪽(+x)을 향하는 법선
-  Offset n = Offset(-dir.dy, dir.dx);
-  if (n.dx < 0) n = -n;
-
-  // 원의 옆면에서 막대 쪽으로 alpha만큼 돌린 지점을 접점으로 사용
-  const double alpha = 35 * math.pi / 180;
-  final double ca = math.cos(alpha), sa = math.sin(alpha);
-  Offset contact(double s) => head + (n * (s * ca) + dir * sa) * r;
-  Offset tangent(double s) => dir * ca - n * (s * sa);
-  Offset edge(double s) => Offset(x + s * barR, joinY);
-  final Offset barDir = Offset(0, dirY);
-
-  final c1 = contact(1), e1 = edge(1), c2 = contact(-1), e2 = edge(-1);
-  final double k1 = (e1 - c1).distance * 0.45;
-  final double k2 = (e2 - c2).distance * 0.45;
-  final a1 = c1 + tangent(1) * k1, b1 = e1 - barDir * k1;
-  final a2 = c2 + tangent(-1) * k2, b2 = e2 - barDir * k2;
-
-  return Path()
-    ..moveTo(c1.dx, c1.dy)
-    ..cubicTo(a1.dx, a1.dy, b1.dx, b1.dy, e1.dx, e1.dy)
-    ..lineTo(e2.dx, e2.dy) // 막대 내부를 지나는 선이라 보이지 않음
-    ..cubicTo(b2.dx, b2.dy, a2.dx, a2.dy, c2.dx, c2.dy)
-    ..close(); // 점 원 내부를 지나는 현
-}
-
-/// 머리 원(head, r)과 꼬리 원(tail, tr)을 잇는 물방울 목 경로.
-/// 기본은 두 원의 공통 외접선(매끈한 눈물방울 모양)이고, 많이 늘어날수록 양쪽 접점을 안쪽으로 돌려
-/// 가운데가 잘록해짐. 옆선은 각 접점에서 원의 접선 방향을 그대로 이어받는 3차 베지어라 경계가 꺾이지 않음
-Path? _dropNeck(Offset head, double r, Offset tail, double tr) {
-  final Offset delta = tail - head;
-  final double d = delta.distance;
-  if (r <= 0 || tr <= 0 || d <= (r - tr).abs() || d < 0.5) return null;
+  if (d < 0.5 || d <= (ra - rb).abs()) return null;
 
   final Offset dir = delta / d;
   final Offset n = Offset(-dir.dy, dir.dx);
+  final double rea = math.max(ra, waist);
+  final double reb = taperToB ? waist : math.max(rb, waist);
 
-  // 외접선 접점 각도(진행 방향 기준)
-  final double phi = math.acos(((r - tr) / d).clamp(-1.0, 1.0));
-  // 늘어난 정도에 따라 접점을 안쪽으로 회전 (값이 너무 크면 양쪽 옆선이 교차하므로 28°로 제한)
-  final double stretch = ((d - (r + tr) * 0.6) / (r * 2.5)).clamp(0.0, 1.0);
-  final double pinch = 28 * math.pi / 180 * stretch;
-  final double hc = math.cos(phi - pinch);
-  final double tc = math.cos(math.pi - phi - pinch * 1.2);
-  final double hs = math.sqrt(1 - hc * hc);
-  final double ts = math.sqrt(1 - tc * tc);
-  final double reach = math.sqrt(math.max(d * d - (r - tr) * (r - tr), 0.0)) * 0.4; // 외접선 길이 기준
+  // 접점 각도 θ(중심선 방향 기준)는 제어점이 원의 접선 위에 오도록 정함. 접점 위치와 서로 얽혀 있어 몇 번 반복해 맞춤
+  // 너무 앞쪽(30° 미만)에서 출발하면 원을 파고드는 모양이 되므로 제한
+  const double minTheta = 30 * math.pi / 180;
+  double ta = math.pi / 2, tb = math.pi / 2;
+  double len = d;
+  for (var i = 0; i < 6; i++) {
+    len = math.max(d - rea * math.cos(ta) - reb * math.cos(tb), 1.0);
+    // 제어점이 안쪽으로 들어가는 양: 양쪽 합이 가운데에서 폭을 waist로 만드는 만큼
+    final double ia = (taperToB ? 1.0 : 4 / 3) * (rea * math.sin(ta) - waist);
+    final double ib = taperToB ? 0.0 : 4 / 3 * (reb * math.sin(tb) - waist);
+    // 값이 오락가락하지 않도록 절반씩만 이동
+    ta = (ta + math.max(math.atan2(len / 3, math.max(ia, 0.0)), minTheta)) / 2;
+    tb = (tb + math.max(math.atan2(len / 3, math.max(ib, 0.0)), minTheta)) / 2;
+  }
+  final double f = len / 3;
+  final double ca = math.cos(ta), sa = math.sin(ta), cb = math.cos(tb), sb = math.sin(tb);
 
-  // s = +1 / -1 : 진행 방향 기준 양쪽 옆선
-  Offset headPt(double s) => head + dir * (r * hc) + n * (s * r * hs);
-  Offset tailPt(double s) => tail - dir * (tr * tc) + n * (s * tr * ts);
-  // 각 접점에서 원의 접선 방향 (꼬리 쪽으로 진행하는 방향)
-  Offset headTan(double s) => dir * hs - n * (s * hc);
-  Offset tailTan(double s) => dir * ts + n * (s * tc);
+  // s = +1 / -1 : 진행 방향 기준 양쪽 옆선 [a 접점, a 쪽 제어점, b 쪽 제어점, b 접점]
+  List<Offset> side(double s) {
+    final Offset pa = a + dir * (rea * ca) + n * (s * rea * sa);
+    final Offset pb = b - dir * (reb * cb) + n * (s * reb * sb);
+    final Offset tanA = dir * sa - n * (s * ca); // a에서 b 쪽으로 향하는 접선
+    final Offset tanB = -dir * sb - n * (s * cb); // b에서 a 쪽으로 향하는 접선
+    return [pa, pa + tanA * (f / sa), pb + tanB * (f / sb), pb];
+  }
 
-  final h1 = headPt(1), t1 = tailPt(1), h2 = headPt(-1), t2 = tailPt(-1);
-  final c1 = h1 + headTan(1) * reach, c2 = t1 - tailTan(1) * reach;
-  final c3 = t2 - tailTan(-1) * reach, c4 = h2 + headTan(-1) * reach;
-
+  final p = side(1), q = side(-1);
   return Path()
-    ..moveTo(h1.dx, h1.dy)
-    ..cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, t1.dx, t1.dy)
-    ..lineTo(t2.dx, t2.dy) // 꼬리 원 내부를 지나는 현이라 보이지 않음
-    ..cubicTo(c3.dx, c3.dy, c4.dx, c4.dy, h2.dx, h2.dy)
-    ..close(); // 머리 원 내부를 지나는 현
+    ..moveTo(p[0].dx, p[0].dy)
+    ..cubicTo(p[1].dx, p[1].dy, p[2].dx, p[2].dy, p[3].dx, p[3].dy)
+    ..lineTo(q[3].dx, q[3].dy) // b 원 내부를 지나는 현이라 보이지 않음
+    ..cubicTo(q[2].dx, q[2].dy, q[1].dx, q[1].dy, q[0].dx, q[0].dy)
+    ..close(); // a 원 내부를 지나는 현
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -62,6 +63,85 @@ class RecordManager {
         elevation: 0,
       ),
     );
+  }
+
+  /// 수정취소 알림 유지 시간(초). 설정 > 편의성 기능에서 조절하며 앱 시작 시 저장된 값으로 갱신됨
+  static double undoToastSeconds = 5.0;
+
+  static OverlayEntry? _undoToast;
+  static Timer? _undoToastTimer;
+
+  /// 화면 상단에 변경 내용과 되돌리기 버튼을 잠시 띄움 (실수로 수정했을 때 바로 취소할 수 있도록)
+  /// 화면 레이아웃을 밀어내지 않도록 오버레이로 띄우며, 새로 띄우면 이전 것은 사라짐
+  static void showUndoToast(
+    BuildContext context,
+    CustomDataType type,
+    String message, {
+    required String actionLabel,
+    required VoidCallback onAction,
+    Duration? duration,
+  }) {
+    hideUndoToast();
+    ScaffoldMessenger.of(context).clearSnackBars();
+
+    final themeColor = Color(type.colorValue ?? Colors.indigo.toARGB32());
+    // 상단 콘텐츠 위에 겹치므로 일반 알림 색을 화면 배경에 섞어 불투명하게 사용
+    final bgColor = Color.alphaBlend(UIStyles.getToastBgColor(themeColor), Theme.of(context).colorScheme.surface);
+    final textColor = UIStyles.getToastTextColor(context);
+
+    final entry = OverlayEntry(
+      builder: (ctx) => Positioned(
+        top: MediaQuery.paddingOf(ctx).top + 12,
+        left: 24,
+        right: 24,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+          builder: (ctx, t, child) => Opacity(
+            opacity: t,
+            child: Transform.translate(offset: Offset(0, -16 * (1 - t)), child: child),
+          ),
+          child: Material(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+              child: Row(
+                children: [
+                  Icon(getIconData(type.iconName), color: themeColor, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      message,
+                      style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(foregroundColor: themeColor),
+                    onPressed: () {
+                      hideUndoToast();
+                      onAction();
+                    },
+                    child: Text(actionLabel, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context, rootOverlay: true).insert(entry);
+    _undoToast = entry;
+    _undoToastTimer = Timer(duration ?? Duration(milliseconds: (undoToastSeconds * 1000).round()), hideUndoToast);
+  }
+
+  static void hideUndoToast() {
+    _undoToastTimer?.cancel();
+    _undoToastTimer = null;
+    _undoToast?.remove();
+    _undoToast = null;
   }
 
   static Future<void> quickLogEvent({

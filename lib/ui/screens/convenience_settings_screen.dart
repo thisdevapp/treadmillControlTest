@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'statistics_screen.dart';
 
-/// 설정 > 편의성 기능: 테마, 꾹 누르기 시간, 차트 보기 설정
+/// 설정 > 편의성 기능: 테마, 꾹 누르기 시간, 수정취소 알림, 차트 보기 설정
 /// (push된 화면은 부모가 다시 빌드해도 갱신되지 않으므로 값을 로컬 상태로 들고 변경 시 콜백으로 전달)
 class ConvenienceSettingsScreen extends StatefulWidget {
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeChanged;
   final double longPressSeconds;
   final ValueChanged<double> onLongPressSecondsChanged;
+  final double undoToastSeconds;
+  final ValueChanged<double> onUndoToastSecondsChanged;
   final ChartDateLabelMode dateLabelMode;
   final ValueChanged<ChartDateLabelMode> onDateLabelModeChanged;
   final bool showAllDetails;
@@ -19,6 +21,8 @@ class ConvenienceSettingsScreen extends StatefulWidget {
     required this.onThemeChanged,
     required this.longPressSeconds,
     required this.onLongPressSecondsChanged,
+    required this.undoToastSeconds,
+    required this.onUndoToastSecondsChanged,
     required this.dateLabelMode,
     required this.onDateLabelModeChanged,
     required this.showAllDetails,
@@ -32,6 +36,7 @@ class ConvenienceSettingsScreen extends StatefulWidget {
 class _ConvenienceSettingsScreenState extends State<ConvenienceSettingsScreen> {
   late ThemeMode _themeMode = widget.themeMode;
   late double _longPressSeconds = widget.longPressSeconds;
+  late double _undoToastSeconds = widget.undoToastSeconds;
   late ChartDateLabelMode _dateLabelMode = widget.dateLabelMode;
   late bool _showAllDetails = widget.showAllDetails;
 
@@ -70,6 +75,26 @@ class _ConvenienceSettingsScreenState extends State<ConvenienceSettingsScreen> {
             onChanged: (value) {
               setState(() => _longPressSeconds = value);
               widget.onLongPressSecondsChanged(value);
+            },
+          ),
+        ),
+        const Divider(),
+        const _SectionHeader("수정취소 알림"),
+        ListTile(
+          title: const Text("수정취소 알림 유지 시간"),
+          subtitle: Text("차트에서 기록 시간을 수정한 뒤 상단 알림과 수정취소 버튼이 보이는 시간: ${_undoToastSeconds.round()}초"),
+          leading: const Icon(Icons.undo_rounded),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: Slider(
+            value: _undoToastSeconds,
+            min: 2.0,
+            max: 15.0,
+            divisions: 13,
+            onChanged: (value) {
+              setState(() => _undoToastSeconds = value);
+              widget.onUndoToastSecondsChanged(value);
             },
           ),
         ),

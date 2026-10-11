@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import '../l10n/app_locale.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -39,9 +40,9 @@ class WithingsImportResult {
   });
 
   String get message {
-    if (fetched == 0) return "가져올 Withings 수면 데이터가 없습니다.";
-    if (added == 0 && updated == 0) return "Withings 수면 기록이 이미 모두 반영되어 있습니다.";
-    return "Withings 수면 기록 $added건 추가, $updated건 갱신";
+    if (fetched == 0) return tr("가져올 Withings 수면 데이터가 없습니다.", "No Withings sleep data to import.");
+    if (added == 0 && updated == 0) return tr("Withings 수면 기록이 이미 모두 반영되어 있습니다.", "All Withings sleep records are already up to date.");
+    return tr("Withings 수면 기록 $added건 추가, $updated건 갱신", "Withings sleep records: $added added, $updated updated");
   }
 }
 
@@ -60,9 +61,9 @@ class WithingsService {
   /// 로그인 창을 사용자가 닫으면 null 반환
   Future<WithingsImportResult?> connectAndImport({required DateTime from, required DateTime to}) async {
     if (!WithingsConfig.isConfigured) {
-      throw WithingsException("Withings 설정값이 없습니다. --dart-define 으로 CLIENT_ID / CLIENT_SECRET / REDIRECT_URI 를 넣어 실행하세요.");
+      throw WithingsException(tr("Withings 설정값이 없습니다. --dart-define 으로 CLIENT_ID / CLIENT_SECRET / REDIRECT_URI 를 넣어 실행하세요.", "Withings is not configured. Run the app with CLIENT_ID / CLIENT_SECRET / REDIRECT_URI passed via --dart-define."));
     }
-    if (to.isBefore(from)) throw WithingsException("종료 날짜가 시작 날짜보다 앞설 수 없습니다.");
+    if (to.isBefore(from)) throw WithingsException(tr("종료 날짜가 시작 날짜보다 앞설 수 없습니다.", "The end date cannot be before the start date."));
 
     String? token = await _validAccessToken();
     if (token == null) {
@@ -96,14 +97,14 @@ class WithingsService {
 
     final params = Uri.parse(result).queryParameters;
     if (params['error'] != null) {
-      throw WithingsException("Withings 인증 실패: ${params['error']}");
+      throw WithingsException(tr("Withings 인증 실패: ${params['error']}", "Withings sign-in failed: ${params['error']}"));
     }
     if (params['state'] != state) {
-      throw WithingsException("Withings 인증 응답의 state가 일치하지 않습니다.");
+      throw WithingsException(tr("Withings 인증 응답의 state가 일치하지 않습니다.", "The Withings sign-in response state did not match."));
     }
     final code = params['code'];
     if (code == null || code.isEmpty) {
-      throw WithingsException("Withings 인증 코드를 받지 못했습니다.");
+      throw WithingsException(tr("Withings 인증 코드를 받지 못했습니다.", "No Withings authorization code was received."));
     }
     return code;
   }
@@ -174,7 +175,7 @@ class WithingsService {
     final refresh = body['refresh_token'] as String?;
     final expiresIn = (body['expires_in'] as num?)?.toInt() ?? 0;
     if (access == null || refresh == null) {
-      throw WithingsException("Withings 토큰 응답이 올바르지 않습니다.");
+      throw WithingsException(tr("Withings 토큰 응답이 올바르지 않습니다.", "The Withings token response was invalid."));
     }
     final expiresAt = DateTime.now().millisecondsSinceEpoch + expiresIn * 1000;
     await _storage.write(key: _kAccessToken, value: access);
@@ -216,7 +217,7 @@ class WithingsService {
 
     final types = await database.getCustomDataTypes();
     final sleepType = RecordManager.findSleepType(types);
-    if (sleepType == null) throw WithingsException("앱에 '수면' 기록 유형이 없습니다.");
+    if (sleepType == null) throw WithingsException(tr("앱에 '수면' 기록 유형이 없습니다.", "The app has no 'Sleep' record type."));
 
     final docs = await getApplicationDocumentsDirectory();
     final stamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
@@ -226,7 +227,7 @@ class WithingsService {
     try {
       backup = await database.backupToFile(p.join(docs.path, 'backups', 'db_before_withings_$stamp.sqlite'));
     } catch (e) {
-      throw WithingsException("DB 백업에 실패해 가져오기를 중단했습니다. ($e)");
+      throw WithingsException(tr("DB 백업에 실패해 가져오기를 중단했습니다. ($e)", "Import stopped because the DB backup failed. ($e)"));
     }
 
     // ② Withings 원본 응답은 DB와 별도 파일로 보관
@@ -327,16 +328,16 @@ class WithingsService {
       final res = await req.close();
       final text = await res.transform(utf8.decoder).join();
       if (res.statusCode != 200) {
-        throw WithingsException("Withings 서버 오류 (HTTP ${res.statusCode})");
+        throw WithingsException(tr("Withings 서버 오류 (HTTP ${res.statusCode})", "Withings server error (HTTP ${res.statusCode})"));
       }
       final json = jsonDecode(text) as Map<String, dynamic>;
       final status = (json['status'] as num?)?.toInt();
       if (status != 0) {
-        throw WithingsException("Withings 요청 실패 (status $status${json['error'] != null ? ': ${json['error']}' : ''})");
+        throw WithingsException("${tr("Withings 요청 실패", "Withings request failed")} (status $status${json['error'] != null ? ': ${json['error']}' : ''})");
       }
       return (json['body'] as Map<String, dynamic>?) ?? const {};
     } on SocketException {
-      throw WithingsException("네트워크에 연결할 수 없습니다.");
+      throw WithingsException(tr("네트워크에 연결할 수 없습니다.", "Cannot connect to the network."));
     } finally {
       client.close();
     }

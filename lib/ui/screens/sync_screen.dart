@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../core/l10n/app_locale.dart';
 import '../../core/withings/withings_config.dart';
 import '../../core/withings/withings_service.dart';
 import '../../database/database.dart';
@@ -14,13 +15,13 @@ class SyncScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("기록 동기화", style: TextStyle(fontWeight: FontWeight.bold))),
+      appBar: AppBar(title: Text(tr("기록 동기화", "Sync records"), style: const TextStyle(fontWeight: FontWeight.bold))),
       body: ListView(children: [
         ListTile(
           title: const Text("Withings"),
           subtitle: Text(WithingsConfig.isConfigured
-              ? "수면 기록(취침·기상 시각, 총 수면시간) 가져오기"
-              : "Client ID / Secret / Redirect URI 미설정 (--dart-define 필요)"),
+              ? tr("수면 기록(취침·기상 시각, 총 수면시간) 가져오기", "Import sleep records (bedtime, wake time, total sleep)")
+              : tr("Client ID / Secret / Redirect URI 미설정 (--dart-define 필요)", "Client ID / Secret / Redirect URI not set (--dart-define required)")),
           leading: const Icon(Icons.watch_rounded),
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () => Navigator.push(
@@ -51,7 +52,7 @@ class _WithingsSyncScreenState extends State<WithingsSyncScreen> {
   WithingsImportResult? _result;
   String? _error;
 
-  final _dateFormat = DateFormat('yyyy년 M월 d일 (E)', 'ko_KR');
+  DateFormat get _dateFormat => AppLocale.isKo ? DateFormat('yyyy년 M월 d일 (E)', 'ko_KR') : DateFormat('EEE, MMM d, yyyy', 'en_US');
 
   @override
   void initState() {
@@ -66,7 +67,7 @@ class _WithingsSyncScreenState extends State<WithingsSyncScreen> {
       context: context,
       initialDate: _from,
       lastDate: _to,
-      helpText: "시작 날짜 선택",
+      helpText: tr("시작 날짜 선택", "Select start date"),
     );
     if (picked != null) setState(() => _from = picked);
   }
@@ -77,7 +78,7 @@ class _WithingsSyncScreenState extends State<WithingsSyncScreen> {
       initialDate: _to,
       firstDate: _from,
       lastDate: DateTime.now(),
-      helpText: "종료 날짜 선택",
+      helpText: tr("종료 날짜 선택", "Select end date"),
     );
     if (picked != null) setState(() => _to = picked);
   }
@@ -92,7 +93,7 @@ class _WithingsSyncScreenState extends State<WithingsSyncScreen> {
       final result = await WithingsService(widget.database).connectAndImport(from: _from, to: _to);
       if (mounted) setState(() => _result = result);
     } catch (e) {
-      if (mounted) setState(() => _error = e is WithingsException ? e.message : "Withings 가져오기 실패: $e");
+      if (mounted) setState(() => _error = e is WithingsException ? e.message : tr("Withings 가져오기 실패: $e", "Withings import failed: $e"));
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
@@ -106,30 +107,33 @@ class _WithingsSyncScreenState extends State<WithingsSyncScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text("Withings", style: TextStyle(fontWeight: FontWeight.bold))),
       body: ListView(children: [
-        const Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text("가져올 기간", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(tr("가져올 기간", "Import period"), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         ),
         ListTile(
-          title: const Text("시작 날짜"),
+          title: Text(tr("시작 날짜", "Start date")),
           subtitle: Text(_dateFormat.format(_from)),
           leading: const Icon(Icons.event_rounded),
           enabled: !_isImporting,
           onTap: _pickFrom,
         ),
         ListTile(
-          title: const Text("종료 날짜"),
+          title: Text(tr("종료 날짜", "End date")),
           subtitle: Text(_dateFormat.format(_to)),
           leading: const Icon(Icons.event_available_rounded),
           enabled: !_isImporting,
           onTap: _pickTo,
         ),
         const Divider(),
-        const ListTile(
-          leading: Icon(Icons.shield_outlined),
-          title: Text("기존 기록 보호"),
-          subtitle: Text("가져오기 전에 현재 DB를 별도 백업 파일로 보존하고, Withings 원본 데이터도 따로 보관합니다. "
-              "저장 도중 문제가 생기면 변경 내용 전체가 취소됩니다."),
+        ListTile(
+          leading: const Icon(Icons.shield_outlined),
+          title: Text(tr("기존 기록 보호", "Existing records are protected")),
+          subtitle: Text(tr(
+              "가져오기 전에 현재 DB를 별도 백업 파일로 보존하고, Withings 원본 데이터도 따로 보관합니다. "
+                  "저장 도중 문제가 생기면 변경 내용 전체가 취소됩니다.",
+              "Before importing, the current DB is saved to a separate backup file and the raw Withings data is kept as well. "
+                  "If anything goes wrong while saving, all changes are rolled back.")),
         ),
         Padding(
           padding: const EdgeInsets.all(16.0),
@@ -138,13 +142,14 @@ class _WithingsSyncScreenState extends State<WithingsSyncScreen> {
             icon: _isImporting
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.download_rounded),
-            label: Text(_isImporting ? "가져오는 중..." : "$days일간 수면 기록 가져오기"),
+            label: Text(_isImporting ? tr("가져오는 중...", "Importing...") : tr("$days일간 수면 기록 가져오기", "Import $days days of sleep records")),
           ),
         ),
         if (!WithingsConfig.isConfigured)
-          const ListTile(
-            leading: Icon(Icons.info_outline_rounded),
-            subtitle: Text("Client ID / Secret / Redirect URI가 설정되지 않았습니다. --dart-define 으로 넣어 실행하세요."),
+          ListTile(
+            leading: const Icon(Icons.info_outline_rounded),
+            subtitle: Text(tr("Client ID / Secret / Redirect URI가 설정되지 않았습니다. --dart-define 으로 넣어 실행하세요.",
+                "Client ID / Secret / Redirect URI are not set. Run the app with them passed via --dart-define.")),
           ),
         if (_error != null)
           ListTile(
@@ -157,9 +162,9 @@ class _WithingsSyncScreenState extends State<WithingsSyncScreen> {
             title: Text(result.message),
           ),
           if (result.backupPath != null)
-            ListTile(dense: true, title: const Text("DB 백업"), subtitle: Text(result.backupPath!)),
+            ListTile(dense: true, title: Text(tr("DB 백업", "DB backup")), subtitle: Text(result.backupPath!)),
           if (result.rawPath != null)
-            ListTile(dense: true, title: const Text("Withings 원본 보관"), subtitle: Text(result.rawPath!)),
+            ListTile(dense: true, title: Text(tr("Withings 원본 보관", "Raw Withings data")), subtitle: Text(result.rawPath!)),
         ],
       ]),
     );

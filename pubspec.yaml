@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations: # 날짜 선택기 등 기본 위젯 문구를 언어 설정에 맞춤
+    sdk: flutter
 
   cupertino_icons: ^2.0.0
   
@@ -36,6 +38,10 @@ dependencies:
   flutter_web_auth_2:
     path: packages/flutter_web_auth_2
   flutter_secure_storage: ^11.2.0
+
+  # Record memos
+  image_picker: ^1.2.4 # 메모에 갤러리 사진 첨부
+  flutter_markdown_plus: ^1.0.12 # 메모 마크다운 표시
 
 dev_dependencies:
   flutter_test:

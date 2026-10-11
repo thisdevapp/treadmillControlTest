@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/l10n/app_locale.dart';
 import '../../database/database.dart';
-import '../../core/constants/ui_styles.dart'; // 스타일 모듈 추가
+import '../widgets/quick_add_button.dart';
 import '../widgets/record_manager.dart';
 import '../widgets/record_type_manager.dart';
 import 'convenience_settings_screen.dart';
@@ -12,12 +12,14 @@ import 'statistics_screen.dart';
 class MainScreen extends StatefulWidget {
   final ThemeMode currentThemeMode;
   final Function(ThemeMode) onThemeChanged;
+  final ValueChanged<AppLanguage> onLanguageChanged;
   final AppDatabase database;
 
   const MainScreen({
     super.key,
     required this.currentThemeMode,
     required this.onThemeChanged,
+    required this.onLanguageChanged,
     required this.database,
   });
 
@@ -26,28 +28,13 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  int _selectedIndex = 0;
+  int _selectedIndex = 0; // 0: 통계, 1: 설정
   double _longPressSeconds = 4.0;
   bool _showAllDetails = false; // 통계 상세 표시 설정 상태 추가
   double _undoToastSeconds = RecordManager.undoToastSeconds;
   ChartDateLabelMode _dateLabelMode = ChartDateLabelMode.dynamic;
-  bool _isEditMode = false;
 
-  // 드래그 및 리사이즈 상태 관리
-  int? _activeId;
-  bool _isResizing = false;
-  double _dragX = 0;
-  double _dragY = 0;
-  double _startGlobalX = 0;
-  double _startGlobalY = 0;
-  int _startGridW = 1;
-  int _startGridH = 1;
-  int _ghostX = 0;
-  int _ghostY = 0;
-  int _ghostW = 1;
-  int _ghostH = 1;
-
-  final List<String> _titles = ["기록 대시보드", "통계 분석", "환경 설정"];
+  List<String> get _titles => [tr("통계 분석", "Statistics"), tr("환경 설정", "Settings")];
 
   @override
   void initState() {
@@ -100,41 +87,23 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
-  IconData _getIconData(String? name) {
-    return RecordManager.getIconData(name);
-  }
+  Color get _bgColor => Theme.of(context).brightness == Brightness.light ? const Color(0xFFF0F2F8) : const Color(0xFF101012);
 
   @override
   Widget build(BuildContext context) {
-    debugPrint("🏗️ MainScreen build 시작 (Theme: ${Theme.of(context).brightness})");
     return Scaffold(
-      backgroundColor: Theme.of(context).brightness == Brightness.light ? const Color(0xFFF0F2F8) : const Color(0xFF101012),
+      backgroundColor: _bgColor,
       appBar: AppBar(
         title: Text(_titles[_selectedIndex], style: const TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.0)),
         centerTitle: false,
         backgroundColor: Colors.transparent,
         elevation: 0,
-        actions: _selectedIndex == 0 ? [
-          IconButton(
-            icon: Icon(_isEditMode ? Icons.check_circle_rounded : Icons.edit_attributes_rounded, color: _isEditMode ? Colors.green : null),
-            onPressed: () => setState(() => _isEditMode = !_isEditMode),
-          ),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline_rounded),
-            onPressed: () => RecordTypeManager.showAddOrEditTypeDialog(
-              context: context, 
-              database: widget.database, 
-              onSaved: () {}
-            ),
-          ),
-        ] : null,
       ),
       body: IndexedStack(
         index: _selectedIndex,
         children: [
-          _buildDashboardView(),
           StatisticsScreen(
-            database: widget.database, 
+            database: widget.database,
             longPressSeconds: _longPressSeconds,
             showAllDetails: _showAllDetails,
             onShowAllDetailsChanged: _updateShowAllDetails,
@@ -143,371 +112,65 @@ class _MainScreenState extends State<MainScreen> {
           _buildSettingsView(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_rounded), label: "기록"),
-          NavigationDestination(icon: Icon(Icons.analytics_rounded), label: "통계"),
-          NavigationDestination(icon: Icon(Icons.settings_rounded), label: "설정"),
+      // 가운데 큰 + 버튼: 한 번 누르면 마지막 점 데이터 추가, 꾹 누르면 데이터 종류 다이얼
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButton: QuickAddButton(
+        database: widget.database,
+        color: const Color(0xFF4CAF50),
+        iconColor: _bgColor,
+        onTap: _quickAddLast,
+        onSelectType: _logType,
+        onTypeMenu: _showWidgetMenu,
+        onAddType: () => RecordTypeManager.showAddOrEditTypeDialog(context: context, database: widget.database, onSaved: () {}),
+      ),
+      bottomNavigationBar: BottomAppBar(
+        height: 64,
+        padding: EdgeInsets.zero,
+        child: Row(
+          children: [
+            Expanded(child: _navItem(0, Icons.analytics_rounded, tr("통계", "Stats"))),
+            const SizedBox(width: QuickAddButton.size + 24),
+            Expanded(child: _navItem(1, Icons.settings_rounded, tr("설정", "Settings"))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem(int index, IconData icon, String label) {
+    final scheme = Theme.of(context).colorScheme;
+    final bool selected = _selectedIndex == index;
+    final Color color = selected ? scheme.primary : scheme.onSurfaceVariant;
+    return InkWell(
+      onTap: () => setState(() => _selectedIndex = index),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: selected ? FontWeight.bold : FontWeight.normal)),
         ],
       ),
     );
   }
 
   // ==========================================
-  // [1] 기록 대시보드
-  // ==========================================
-  Widget _buildDashboardView() {
-    final Size screenSize = MediaQuery.of(context).size;
-    final bool isTablet = screenSize.width > 600;
-    final int columns = isTablet ? 6 : 4;
-
-    return StreamBuilder<List<CustomDataType>>(
-      stream: widget.database.watchCustomDataTypes(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          debugPrint("❌ StreamBuilder 에러 발생: ${snapshot.error}");
-          return Center(child: Text("데이터 로드 에러: ${snapshot.error}"));
-        }
-        
-        if (!snapshot.hasData) {
-          debugPrint("⏳ 데이터 대기 중 (StreamBuilder)...");
-          return const Center(child: CircularProgressIndicator());
-        }
-        
-        final types = snapshot.data!;
-        
-        if (types.isEmpty) {
-          return Center(child: SingleChildScrollView(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.auto_awesome_motion_rounded, size: 64, color: Colors.grey),
-                const SizedBox(height: 16),
-                const Text("대시보드 구성이 비어있습니다.", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    await widget.database.fixDataIntegrity(columns: columns);
-                    setState(() {});
-                  },
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text("기본 버튼 세트 생성 및 복구"),
-                )
-              ],
-            ),
-          ));
-        }
-
-        return LayoutBuilder(builder: (context, constraints) {
-          if (constraints.maxWidth < 100 || constraints.maxHeight < 100) {
-            return const Center(child: Text("화면 크기 대기 중..."));
-          }
-
-          final double horizontalPadding = 48;
-          final double verticalPadding = 48;
-          final double cellWidth = (constraints.maxWidth - horizontalPadding) / columns;
-          final double cellHeight = (constraints.maxHeight - verticalPadding) / 6;
-
-          return GestureDetector(
-            onTap: () {
-              if (_isEditMode) {
-                setState(() => _isEditMode = false);
-              }
-            },
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
-              padding: const EdgeInsets.all(24),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  if (_isEditMode) _buildGridGuide(constraints.maxWidth - horizontalPadding, cellHeight, 6, columns),
-                  
-                  if (_activeId != null) Positioned(
-                    left: _ghostX * cellWidth,
-                    top: _ghostY * cellHeight,
-                    width: _ghostW * cellWidth,
-                    height: _ghostH * cellHeight,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4.0),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.indigo.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.indigo.withValues(alpha: 0.3), width: 2, strokeAlign: BorderSide.strokeAlignOutside),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  ...types.map((type) => _buildPositionedWidget(type, cellWidth, cellHeight)),
-                ],
-              ),
-            ),
-          );
-        });
-      },
-    );
-  }
-
-  Widget _buildPositionedWidget(CustomDataType type, double cellW, double cellH) {
-    final bool isActive = _activeId == type.id;
-    final bool isMoving = isActive && !_isResizing;
-    final bool isResizing = isActive && _isResizing;
-    
-    return AnimatedPositioned(
-      duration: isActive ? Duration.zero : const Duration(milliseconds: 300),
-      curve: Curves.easeOutQuart,
-      left: isMoving ? _dragX : type.gridX * cellW,
-      top: isMoving ? _dragY : type.gridY * cellH,
-      width: isResizing ? _ghostW * cellW : type.gridWidth * cellW,
-      height: isResizing ? _ghostH * cellH : type.gridHeight * cellH,
-      child: Padding(
-        padding: const EdgeInsets.all(6.0),
-        child: _buildWidgetCard(type, cellW, cellH),
-      ),
-    );
-  }
-
-  Widget _buildWidgetCard(CustomDataType type, double cellW, double cellH) {
-    final bool isActive = _activeId == type.id;
-    final bool isResizing = isActive && _isResizing;
-
-    final int currentW = isResizing ? _ghostW : type.gridWidth;
-    final int currentH = isResizing ? _ghostH : type.gridHeight;
-    final bool isSmall = currentW == 1 && currentH == 1;
-    
-    final Color color = Color(type.colorValue ?? Colors.indigo.toARGB32());
-    final int maxCol = MediaQuery.of(context).size.width > 600 ? 6 : 4;
-
-    final Color themeBgColor = Theme.of(context).scaffoldBackgroundColor;
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanStart: _isEditMode ? (details) {
-        final double lx = details.localPosition.dx;
-        final double ly = details.localPosition.dy;
-        final double cardW = cellW * type.gridWidth;
-        final double cardH = cellH * type.gridHeight;
-        
-        if (lx > cardW - 50 && ly > cardH - 50) {
-          setState(() {
-            _activeId = type.id;
-            _isResizing = true;
-            _startGlobalX = details.globalPosition.dx;
-            _startGlobalY = details.globalPosition.dy;
-            _startGridW = type.gridWidth;
-            _startGridH = type.gridHeight;
-            _ghostX = type.gridX;
-            _ghostY = type.gridY;
-            _ghostW = type.gridWidth;
-            _ghostH = type.gridHeight;
-          });
-        } else {
-          setState(() {
-            _activeId = type.id;
-            _isResizing = false;
-            _dragX = type.gridX * cellW;
-            _dragY = type.gridY * cellH;
-            _ghostX = type.gridX;
-            _ghostY = type.gridY;
-            _ghostW = type.gridWidth;
-            _ghostH = type.gridHeight;
-          });
-        }
-      } : null,
-      onPanUpdate: _isEditMode ? (details) {
-        if (_activeId != type.id) return;
-
-        if (_isResizing) {
-          double deltaX = details.globalPosition.dx - _startGlobalX;
-          double deltaY = details.globalPosition.dy - _startGlobalY;
-          int newW = (_startGridW + deltaX / cellW).round().clamp(1, maxCol - type.gridX);
-          int newH = (_startGridH + deltaY / cellH).round().clamp(1, 6);
-          if (newW != _ghostW || newH != _ghostH) {
-            setState(() {
-              _ghostW = newW;
-              _ghostH = newH;
-            });
-          }
-        } else {
-          setState(() {
-            _dragX += details.delta.dx;
-            _dragY += details.delta.dy;
-            _ghostX = (_dragX / cellW).round().clamp(0, maxCol - type.gridWidth);
-            _ghostY = (_dragY / cellH).round().clamp(0, 6);
-          });
-        }
-      } : null,
-      onPanEnd: _isEditMode ? (details) async {
-        if (_activeId != type.id) return;
-        final int finalId = type.id;
-        final int finalX = _isResizing ? type.gridX : _ghostX;
-        final int finalY = _isResizing ? type.gridY : _ghostY;
-        final int finalW = _isResizing ? _ghostW : type.gridWidth;
-        final int finalH = _isResizing ? _ghostH : type.gridHeight;
-        setState(() {
-          _activeId = null;
-          _isResizing = false;
-        });
-        await widget.database.updateCustomDataTypeLayout(finalId, finalX, finalY, finalW, finalH);
-        await widget.database.fixDataIntegrity(columns: maxCol);
-      } : null,
-      onTap: _isEditMode ? null : () => _onWidgetTap(type),
-      onDoubleTap: _isEditMode ? null : () {
-        HapticFeedback.mediumImpact();
-        _showWidgetMenu(type);
-      },
-      onLongPress: _isEditMode ? null : () {
-        HapticFeedback.heavyImpact();
-        setState(() => _isEditMode = true);
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: UIStyles.getWidgetBgColor(color), // 중앙 관리 스타일 적용
-          borderRadius: BorderRadius.circular(isSmall ? 18 : 24),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: UIStyles.shadowOpacity), 
-              blurRadius: isActive ? 20 : 10, 
-              offset: isActive ? const Offset(0, 8) : const Offset(0, 4)
-            )
-          ],
-          // 편집 모드 시 테마에 따라 대비되는 테두리 표시
-          border: _isEditMode ? Border.all(color: color.withValues(alpha: isActive ? 1.0 : 0.3), width: isActive ? 3 : 1.5) : null,
-        ),
-        child: Stack(
-          children: [
-            // 아이콘과 텍스트 컬러를 해당 데이터 컬러(color)로 적용
-            _buildWidgetContent(type, currentW, currentH, color),
-            if (_isEditMode) ...[
-              Positioned(
-                top: 4, right: 0, left: 0,
-                child: Icon(Icons.drag_handle_rounded, size: 14, color: themeBgColor.withValues(alpha: 0.5))
-              ),
-              Positioned(
-                top: -2, left: -2,
-                child: IconButton(
-                  icon: Icon(Icons.remove_circle, size: 18, color: themeBgColor),
-                  onPressed: () => RecordTypeManager.confirmDeleteType(
-                    context: context, 
-                    database: widget.database, 
-                    type: type, 
-                    onDeleteDone: () {}
-                  ),
-                ),
-              ),
-              Positioned(
-                bottom: 0, right: 0,
-                child: Container(
-                  width: 50, height: 50,
-                  alignment: Alignment.bottomRight,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isResizing ? Colors.red.withValues(alpha: 0.2) : themeBgColor.withValues(alpha: 0.1),
-                    borderRadius: const BorderRadius.only(bottomRight: Radius.circular(18)),
-                  ),
-                  child: Icon(
-                    Icons.south_east_rounded, 
-                    size: 24, 
-                    color: isResizing ? Colors.redAccent : themeBgColor,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWidgetContent(CustomDataType type, int w, int h, Color iconColor) {
-    final bool isHorizontal = w > h;
-    final IconData iconData = _getIconData(type.iconName);
-    final Color textColor = UIStyles.getWidgetTextColor(context); // 중앙 관리 스타일 적용
-
-    if (isHorizontal) {
-      return LayoutBuilder(builder: (context, constraints) {
-        final double minSide = constraints.maxWidth < constraints.maxHeight ? constraints.maxWidth : constraints.maxHeight;
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12.0),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(iconData, color: iconColor, size: minSide * 0.5),
-              const SizedBox(width: 8),
-              Flexible(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    type.name,
-                    style: TextStyle(
-                      fontSize: 18, 
-                      fontWeight: FontWeight.w900, 
-                      letterSpacing: -0.5, 
-                      color: textColor, // 모드에 따라 검정/흰색 적용
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      });
-    } else {
-      return LayoutBuilder(builder: (context, constraints) {
-        final double minSide = constraints.maxWidth < constraints.maxHeight ? constraints.maxWidth : constraints.maxHeight;
-        final bool isSmall = w == 1 && h == 1;
-        return Container(
-          padding: const EdgeInsets.all(8.0),
-          child: Column(
-            children: [
-              Expanded(flex: 5, child: Center(child: Icon(iconData, color: iconColor, size: minSide * (isSmall ? 0.45 : 0.55)))),
-              Expanded(
-                flex: 2, 
-                child: Center(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown, 
-                    alignment: Alignment.topCenter, 
-                    child: Text(
-                      type.name, 
-                      style: TextStyle(
-                        fontSize: 16, 
-                        fontWeight: FontWeight.w900, 
-                        letterSpacing: -0.5, 
-                        color: textColor, // 모드에 따라 검정/흰색 적용
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      });
-    }
-  }
-
-  Widget _buildGridGuide(double width, double cellH, int rows, int columns) {
-    return Column(children: List.generate(rows, (y) => Row(children: List.generate(columns, (x) => Container(
-      width: width / columns, height: cellH,
-      decoration: BoxDecoration(border: Border.all(color: Colors.grey.withValues(alpha: 0.05))),
-    )))));
-  }
-
-  // ==========================================
-  // [2] 설정 탭 뷰
+  // [1] 설정 탭 뷰
   // ==========================================
   Widget _buildSettingsView() {
     return ListView(children: [
-      const Padding(padding: EdgeInsets.all(16.0), child: Text("환경 설정", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+      Padding(padding: const EdgeInsets.all(16.0), child: Text(tr("환경 설정", "Settings"), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
       ListTile(
-        title: const Text("편의성 기능"),
-        subtitle: const Text("테마, 꾹 누르기 시간, 수정취소 알림, 차트 보기"),
+        title: Text(tr("언어", "Language")),
+        subtitle: Text(AppLocale.setting.label),
+        leading: const Icon(Icons.language_rounded),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: _showLanguageDialog,
+      ),
+      const Divider(),
+      ListTile(
+        title: Text(tr("편의성 기능", "Convenience")),
+        subtitle: Text(tr("테마, 꾹 누르기 시간, 수정취소 알림, 차트 보기", "Theme, long-press time, undo notice, chart view")),
         leading: const Icon(Icons.tune_rounded),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ConvenienceSettingsScreen(
@@ -525,8 +188,8 @@ class _MainScreenState extends State<MainScreen> {
       ),
       const Divider(),
       ListTile(
-        title: const Text("데이터"),
-        subtitle: const Text("기록 동기화, 모든 데이터 초기화"),
+        title: Text(tr("데이터", "Data")),
+        subtitle: Text(tr("기록 동기화, 모든 데이터 초기화", "Sync records, reset all data")),
         leading: const Icon(Icons.storage_rounded),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DataSettingsScreen(database: widget.database))),
@@ -534,11 +197,45 @@ class _MainScreenState extends State<MainScreen> {
     ]);
   }
 
+  /// 설정 > 언어: 시스템 설정 / 한국어 / English
+  void _showLanguageDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(tr("언어", "Language")),
+        children: [
+          RadioGroup<AppLanguage>(
+            groupValue: AppLocale.setting,
+            onChanged: (value) {
+              Navigator.pop(ctx);
+              if (value != null) widget.onLanguageChanged(value);
+            },
+            child: Column(children: [
+              for (final lang in AppLanguage.values)
+                RadioListTile<AppLanguage>(title: Text(lang.label), value: lang),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ==========================================
-  // [3] 비즈니스 로직
+  // [2] 비즈니스 로직
   // ==========================================
-  void _onWidgetTap(CustomDataType type) {
-    HapticFeedback.mediumImpact();
+  /// 마지막에 추가한 점 데이터(수면 제외)와 같은 종류를 지금 시각으로 한 번 더 기록.
+  /// 아직 점 기록이 없으면 false (다이얼을 대신 엶)
+  Future<bool> _quickAddLast() async {
+    final types = await widget.database.getCustomDataTypes();
+    final sleepType = RecordManager.findSleepType(types);
+    final last = await widget.database.getLastAddedRecord(excludeTypeId: sleepType?.id);
+    final type = types.where((t) => t.id == last?.typeId).firstOrNull;
+    if (type == null || !mounted) return false;
+    _logType(type);
+    return true;
+  }
+
+  void _logType(CustomDataType type) {
     if (type.name == '수면') {
       RecordManager.showSleepLogDialog(
         context: context,
@@ -576,7 +273,7 @@ class _MainScreenState extends State<MainScreen> {
               _menuOption(
                 ctx,
                 icon: Icons.add_circle_outline_rounded,
-                label: "지금 기록 추가",
+                label: tr("지금 기록 추가", "Log now"),
                 onColor: onColor,
                 onTap: () => RecordManager.quickLogEvent(
                   context: context,
@@ -590,7 +287,7 @@ class _MainScreenState extends State<MainScreen> {
             _menuOption(
               ctx,
               icon: Icons.history_rounded,
-              label: "지난 기록 추가",
+              label: tr("지난 기록 추가", "Add past record"),
               onColor: onColor,
               onTap: () {
                 if (type.name == '수면') {
@@ -614,7 +311,7 @@ class _MainScreenState extends State<MainScreen> {
             _menuOption(
               ctx,
               icon: Icons.note_add_rounded,
-              label: "메모 추가",
+              label: tr("메모 추가", "Add memo"),
               onColor: onColor,
               onTap: () => RecordManager.showMemoDialog(
                 context: context,
@@ -627,13 +324,26 @@ class _MainScreenState extends State<MainScreen> {
             _menuOption(
               ctx,
               icon: Icons.settings_suggest_rounded,
-              label: "기록 수정",
+              label: tr("기록 수정", "Edit type"),
               onColor: onColor,
               onTap: () => RecordTypeManager.showAddOrEditTypeDialog(
                 context: context, 
                 database: widget.database, 
                 type: type, 
                 onSaved: () {}
+              ),
+            ),
+            const Divider(color: Colors.white24, indent: 16, endIndent: 16),
+            _menuOption(
+              ctx,
+              icon: Icons.delete_outline_rounded,
+              label: tr("종류 삭제", "Delete type"),
+              onColor: onColor,
+              onTap: () => RecordTypeManager.confirmDeleteType(
+                context: context,
+                database: widget.database,
+                type: type,
+                onDeleteDone: () {},
               ),
             ),
           ],

@@ -1,3 +1,5 @@
+import '../l10n/app_locale.dart';
+
 class SleepCalculator {
   /// HH:mm 문자열을 분 단위로 변환 (00:00 기준)
   static int? timeToMinutes(String? timeStr) {
@@ -46,7 +48,7 @@ class SleepCalculator {
     if (totalMinutes == null) return "-";
     int hours = totalMinutes ~/ 60;
     int minutes = totalMinutes % 60;
-    if (hours == 0) return "$minutes분";
-    return "$hours시간 $minutes분";
+    if (hours == 0) return tr("$minutes분", "${minutes}m");
+    return tr("$hours시간 $minutes분", "${hours}h ${minutes}m");
   }
 }

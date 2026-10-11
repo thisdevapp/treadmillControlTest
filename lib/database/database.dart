@@ -328,6 +328,12 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> deleteCustomDataRecord(int id) => (delete(customDataRecords)..where((t) => t.id.equals(id))).go();
 
+  /// 모든 기록 id (DB에서 사라진 기록의 메모 파일 정리용)
+  Future<Set<int>> getAllRecordIds() async {
+    final rows = await (selectOnly(customDataRecords)..addColumns([customDataRecords.id])).get();
+    return {for (final row in rows) row.read(customDataRecords.id)!};
+  }
+
   Future<void> updateCustomDataRecord(int id, {DateTime? timestamp, String? value}) {
     return (update(customDataRecords)..where((t) => t.id.equals(id))).write(
       CustomDataRecordsCompanion(
@@ -354,6 +360,16 @@ class AppDatabase extends _$AppDatabase {
     return (select(customDataRecords)
           ..where((t) => t.typeId.equals(typeId))
           ..orderBy([(t) => OrderingTerm(expression: t.unixTimestamp, mode: OrderingMode.desc)])
+          ..limit(1))
+        .getSingleOrNull();
+  }
+
+  /// 가장 마지막에 추가(입력 순서 기준)한 기록. [excludeTypeId] 타입(예: 수면)은 제외
+  Future<CustomDataRecord?> getLastAddedRecord({int? excludeTypeId}) {
+    final query = select(customDataRecords);
+    if (excludeTypeId != null) query.where((t) => t.typeId.equals(excludeTypeId).not());
+    return (query
+          ..orderBy([(t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc)])
           ..limit(1))
         .getSingleOrNull();
   }

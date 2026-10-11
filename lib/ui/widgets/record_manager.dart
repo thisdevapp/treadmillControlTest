@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../core/l10n/app_locale.dart';
 import '../../database/database.dart';
 import '../../core/constants/ui_styles.dart'; // 스타일 모듈 추가
 import 'custom_picker_utils.dart';
@@ -168,7 +169,9 @@ class RecordManager {
       value: memo,
     );
     
-    onShowToast?.call(type, memo != null ? "${type.name} 기록 완료 (메모 상속됨)" : "${type.name} 기록 완료");
+    onShowToast?.call(type, memo != null
+        ? tr("${type.label} 기록 완료 (메모 상속됨)", "${type.label} logged (previous memo reused)")
+        : tr("${type.label} 기록 완료", "${type.label} logged"));
   }
 
   static Future<void> showAddPastRecordDialog({
@@ -192,7 +195,7 @@ class RecordManager {
             children: [
               Icon(getIconData(type.iconName), color: Colors.indigo, size: 28),
               const SizedBox(width: 12),
-              Text(existingRecordId != null ? "${type.name} 기록 수정" : "${type.name} 과거 기록 추가", 
+              Text(existingRecordId != null ? tr("${type.label} 기록 수정", "Edit ${type.label} record") : tr("${type.label} 과거 기록 추가", "Add past ${type.label} record"), 
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
             ],
           ),
@@ -202,12 +205,12 @@ class RecordManager {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("날짜, 시간 및 내용을 설정해주세요.", style: TextStyle(fontSize: 15, color: Colors.grey)),
+                  Text(tr("날짜, 시간 및 내용을 설정해주세요.", "Set the date, time and details."), style: const TextStyle(fontSize: 15, color: Colors.grey)),
                   const SizedBox(height: 28),
                   
                   _buildTimeTile(
                     context: context,
-                    label: "기록 시간",
+                    label: tr("기록 시간", "Time"),
                     dateTime: finalTime,
                     onChanged: (newDt) => setDlgState(() => finalTime = newDt),
                   ),
@@ -218,12 +221,12 @@ class RecordManager {
                     maxLines: 10,
                     minLines: 5,
                     style: const TextStyle(fontSize: 18),
-                    decoration: const InputDecoration(
-                      labelText: "메모 (선택)",
-                      labelStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      hintText: "내용을 입력하세요.",
+                    decoration: InputDecoration(
+                      labelText: tr("메모 (선택)", "Memo (optional)"),
+                      labelStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      hintText: tr("내용을 입력하세요.", "Enter details."),
                       alignLabelWithHint: true,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                 ],
@@ -234,7 +237,7 @@ class RecordManager {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx), 
-              child: const Text("취소", style: TextStyle(fontSize: 17))
+              child: Text(tr("취소", "Cancel"), style: const TextStyle(fontSize: 17))
             ),
             FilledButton(
               style: FilledButton.styleFrom(
@@ -255,11 +258,13 @@ class RecordManager {
                 
                 // 실제 저장이 성공한 시점에 토스트 표시
                 if (ctx.mounted) {
-                  onShowToast?.call(type, existingRecordId != null ? "${type.name} 기록이 수정되었습니다." : "${type.name} 과거 기록이 추가되었습니다.");
+                  onShowToast?.call(type, existingRecordId != null
+                      ? tr("${type.label} 기록이 수정되었습니다.", "${type.label} record updated.")
+                      : tr("${type.label} 과거 기록이 추가되었습니다.", "Past ${type.label} record added."));
                   Navigator.pop(ctx);
                 }
               },
-              child: Text(existingRecordId != null ? "수정하기" : "저장하기", 
+              child: Text(existingRecordId != null ? tr("수정하기", "Update") : tr("저장하기", "Save"), 
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
           ],
@@ -282,7 +287,7 @@ class RecordManager {
     final bool? memoConfirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(existingRecordId != null ? "${type.name} 메모 수정" : "${type.name} 메모 작성"),
+        title: Text(existingRecordId != null ? tr("${type.label} 메모 수정", "Edit ${type.label} memo") : tr("${type.label} 메모 작성", "Write ${type.label} memo")),
         content: SizedBox(
           width: double.maxFinite,
           child: TextField(
@@ -290,19 +295,19 @@ class RecordManager {
             autofocus: true,
             maxLines: 20,
             minLines: 10,
-            decoration: const InputDecoration(
-              labelText: "메모 입력",
-              hintText: "예:\n- 아메리카노 300ml\n- 비타민 C\n- 타이레놀 1정",
+            decoration: InputDecoration(
+              labelText: tr("메모 입력", "Memo"),
+              hintText: tr("예:\n- 아메리카노 300ml\n- 비타민 C\n- 타이레놀 1정", "e.g.\n- Americano 300ml\n- Vitamin C\n- Tylenol 1 tablet"),
               alignLabelWithHint: true,
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
             ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("취소")),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr("취소", "Cancel"))),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(existingRecordId != null ? "수정 완료" : "다음 (기간 설정)"),
+            child: Text(existingRecordId != null ? tr("수정 완료", "Save") : tr("다음 (기간 설정)", "Next (set period)")),
           ),
         ],
       ),
@@ -312,7 +317,7 @@ class RecordManager {
 
     if (existingRecordId != null) {
       await database.updateCustomDataRecord(existingRecordId, value: memoController.text.trim());
-      if (context.mounted) onShowToast?.call(type, "${type.name} 메모 수정됨");
+      if (context.mounted) onShowToast?.call(type, tr("${type.label} 메모 수정됨", "${type.label} memo updated"));
       return;
     }
 
@@ -327,32 +332,32 @@ class RecordManager {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlgState) => AlertDialog(
-          title: const Text("메모 적용 기간 설정"),
+          title: Text(tr("메모 적용 기간 설정", "Apply memo to period")),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("선택한 기간 내의 모든 기록에\n이 메모가 적용됩니다.", textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Colors.grey)),
+              Text(tr("선택한 기간 내의 모든 기록에\n이 메모가 적용됩니다.", "This memo will be applied to\nall records in the selected period."), textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Colors.grey)),
               const SizedBox(height: 16),
               _buildTimeTile(
                 context: context,
-                label: "시작",
+                label: tr("시작", "Start"),
                 dateTime: startDT,
                 onChanged: (newDt) => setDlgState(() => startDT = newDt),
               ),
               const SizedBox(height: 8),
               _buildTimeTile(
                 context: context,
-                label: "종료",
+                label: tr("종료", "End"),
                 dateTime: endDT,
                 onChanged: (newDt) => setDlgState(() => endDT = newDt),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("이전")),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr("이전", "Back"))),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("메모 적용"),
+              child: Text(tr("메모 적용", "Apply memo")),
             ),
           ],
         ),
@@ -368,7 +373,7 @@ class RecordManager {
       );
       
       if (context.mounted) {
-        onShowToast?.call(type, "기간 내 메모가 적용되었습니다.");
+        onShowToast?.call(type, tr("기간 내 메모가 적용되었습니다.", "Memo applied to the period."));
       }
     }
   }
@@ -397,7 +402,7 @@ class RecordManager {
             children: [
               const Icon(Icons.bedtime_rounded, color: Colors.indigo, size: 28),
               const SizedBox(width: 12),
-              Text(existingRecordId != null ? "수면 기록 수정" : "수면 기록 추가", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
+              Text(existingRecordId != null ? tr("수면 기록 수정", "Edit sleep record") : tr("수면 기록 추가", "Add sleep record"), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
             ],
           ),
           content: SizedBox(
@@ -406,12 +411,12 @@ class RecordManager {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("취침 및 기상 시간을 설정해주세요.", style: TextStyle(fontSize: 15, color: Colors.grey)),
+                  Text(tr("취침 및 기상 시간을 설정해주세요.", "Set your bedtime and wake time."), style: const TextStyle(fontSize: 15, color: Colors.grey)),
                   const SizedBox(height: 28),
                   
                   _buildTimeTile(
                     context: context,
-                    label: "취침 시간",
+                    label: tr("취침 시간", "Bedtime"),
                     dateTime: startDT,
                     onChanged: (newDt) => setDlgState(() => startDT = newDt),
                   ),
@@ -419,7 +424,7 @@ class RecordManager {
                   
                   _buildTimeTile(
                     context: context,
-                    label: "기상 시간",
+                    label: tr("기상 시간", "Wake time"),
                     dateTime: endDT,
                     onChanged: (newDt) => setDlgState(() => endDT = newDt),
                   ),
@@ -430,12 +435,12 @@ class RecordManager {
                     maxLines: 15,
                     minLines: 10,
                     style: const TextStyle(fontSize: 18),
-                    decoration: const InputDecoration(
-                      labelText: "수면 메모 (선택)",
-                      labelStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      hintText: "내용을 자유롭게 기록하세요.",
+                    decoration: InputDecoration(
+                      labelText: tr("수면 메모 (선택)", "Sleep memo (optional)"),
+                      labelStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      hintText: tr("내용을 자유롭게 기록하세요.", "Write anything you like."),
                       alignLabelWithHint: true,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                 ],
@@ -446,7 +451,7 @@ class RecordManager {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx), 
-              child: const Text("취소", style: TextStyle(fontSize: 17))
+              child: Text(tr("취소", "Cancel"), style: const TextStyle(fontSize: 17))
             ),
             FilledButton(
               style: FilledButton.styleFrom(
@@ -469,11 +474,11 @@ class RecordManager {
                 final types = await database.getCustomDataTypes();
                 final sleepType = types.firstWhere((t) => t.id == sleepTypeId);
                 if (ctx.mounted) {
-                  onShowToast?.call(sleepType, existingRecordId != null ? "수면 기록이 수정되었습니다." : "수면 기록이 저장되었습니다.");
+                  onShowToast?.call(sleepType, existingRecordId != null ? tr("수면 기록이 수정되었습니다.", "Sleep record updated.") : tr("수면 기록이 저장되었습니다.", "Sleep record saved."));
                   Navigator.pop(ctx);
                 }
               },
-              child: Text(existingRecordId != null ? "수정하기" : "저장하기", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              child: Text(existingRecordId != null ? tr("수정하기", "Update") : tr("저장하기", "Save"), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -508,11 +513,11 @@ class RecordManager {
         : types.where((t) => t.id != sleepType?.id).toList();
     if (!context.mounted) return;
 
-    final f = DateFormat('M/d(E) HH:mm', 'ko_KR');
+    final f = DateFormat(tr('M/d(E) HH:mm', 'EEE M/d HH:mm'), AppLocale.intl);
     final String timeText;
     if (end != null) {
       final diff = end.difference(start);
-      timeText = "${f.format(start)}\n~ ${f.format(end)}\n(${diff.inHours}시간 ${diff.inMinutes % 60}분)";
+      timeText = "${f.format(start)}\n~ ${f.format(end)}\n(${trDuration(diff.inHours, diff.inMinutes % 60)})";
     } else {
       timeText = f.format(start);
     }
@@ -520,7 +525,7 @@ class RecordManager {
     final selected = await showDialog<CustomDataType>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(end != null ? "기간 기록 저장" : "기록 저장", style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(end != null ? tr("기간 기록 저장", "Save period record") : tr("기록 저장", "Save record"), style: const TextStyle(fontWeight: FontWeight.bold)),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -529,11 +534,11 @@ class RecordManager {
               Text(timeText, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.indigo)),
               const SizedBox(height: 16),
               if (candidates.isEmpty)
-                const Text("저장할 수 있는 기록 종류가 없습니다.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey))
+                Text(tr("저장할 수 있는 기록 종류가 없습니다.", "There are no record types to save to."), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey))
               else
                 ...candidates.map((t) => ListTile(
                   leading: Icon(getIconData(t.iconName), color: Color(t.colorValue ?? Colors.indigo.toARGB32()), size: 28),
-                  title: Text(t.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  title: Text(t.label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   onTap: () => Navigator.pop(ctx, t),
                 )),
@@ -541,7 +546,7 @@ class RecordManager {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr("취소", "Cancel"))),
         ],
       ),
     );
@@ -553,7 +558,7 @@ class RecordManager {
       value: end != null ? _encodeSleepValue(end, '') : null,
     );
     if (context.mounted) {
-      onShowToast?.call(selected, "${selected.name} 기록이 추가되었습니다.");
+      onShowToast?.call(selected, tr("${selected.label} 기록이 추가되었습니다.", "${selected.label} record added."));
     }
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/l10n/app_locale.dart';
 import 'statistics_screen.dart';
 
 /// 설정 > 편의성 기능: 테마, 꾹 누르기 시간, 수정취소 알림, 차트 보기 설정
@@ -43,26 +44,27 @@ class _ConvenienceSettingsScreenState extends State<ConvenienceSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("편의성 기능")),
+      appBar: AppBar(title: Text(tr("편의성 기능", "Convenience"))),
       body: ListView(children: [
-        const _SectionHeader("테마 설정"),
+        _SectionHeader(tr("테마 설정", "Theme")),
         RadioGroup<ThemeMode>(
           groupValue: _themeMode,
           onChanged: (value) {
             setState(() => _themeMode = value!);
             widget.onThemeChanged(value!);
           },
-          child: const Column(children: [
-            RadioListTile<ThemeMode>(title: Text("시스템 설정"), value: ThemeMode.system),
-            RadioListTile<ThemeMode>(title: Text("라이트 모드"), value: ThemeMode.light),
-            RadioListTile<ThemeMode>(title: Text("다크 모드"), value: ThemeMode.dark),
+          child: Column(children: [
+            RadioListTile<ThemeMode>(title: Text(tr("시스템 설정", "System default")), value: ThemeMode.system),
+            RadioListTile<ThemeMode>(title: Text(tr("라이트 모드", "Light mode")), value: ThemeMode.light),
+            RadioListTile<ThemeMode>(title: Text(tr("다크 모드", "Dark mode")), value: ThemeMode.dark),
           ]),
         ),
         const Divider(),
-        const _SectionHeader("꾹 누르기 시간"),
+        _SectionHeader(tr("꾹 누르기 시간", "Long-press time")),
         ListTile(
-          title: const Text("통계 차트 꾹 누르기 시간"),
-          subtitle: Text("기록 추가·수정·삭제 시 꾹 누르기 시간: ${_longPressSeconds.toStringAsFixed(1)}초"),
+          title: Text(tr("통계 차트 꾹 누르기 시간", "Chart long-press time")),
+          subtitle: Text(tr("기록 추가·수정·삭제 시 꾹 누르기 시간: ${_longPressSeconds.toStringAsFixed(1)}초",
+              "Hold time to add, edit or delete records: ${_longPressSeconds.toStringAsFixed(1)}s")),
           leading: const Icon(Icons.timer_rounded),
         ),
         Padding(
@@ -79,10 +81,11 @@ class _ConvenienceSettingsScreenState extends State<ConvenienceSettingsScreen> {
           ),
         ),
         const Divider(),
-        const _SectionHeader("수정취소 알림"),
+        _SectionHeader(tr("수정취소 알림", "Undo notice")),
         ListTile(
-          title: const Text("수정취소 알림 유지 시간"),
-          subtitle: Text("차트에서 기록 시간을 수정한 뒤 상단 알림과 수정취소 버튼이 보이는 시간: ${_undoToastSeconds.round()}초"),
+          title: Text(tr("수정취소 알림 유지 시간", "Undo notice duration")),
+          subtitle: Text(tr("차트에서 기록 시간을 수정한 뒤 상단 알림과 수정취소 버튼이 보이는 시간: ${_undoToastSeconds.round()}초",
+              "How long the top notice and Undo button stay after editing a time on the chart: ${_undoToastSeconds.round()}s")),
           leading: const Icon(Icons.undo_rounded),
         ),
         Padding(
@@ -99,9 +102,9 @@ class _ConvenienceSettingsScreenState extends State<ConvenienceSettingsScreen> {
           ),
         ),
         const Divider(),
-        const _SectionHeader("차트 보기"),
+        _SectionHeader(tr("차트 보기", "Chart view")),
         ListTile(
-          title: const Text("날짜 표기"),
+          title: Text(tr("날짜 표기", "Date labels")),
           subtitle: Text("${_dateLabelMode.label} · ${_dateLabelMode.description}"),
           leading: const Icon(Icons.text_rotation_angledown_rounded),
           trailing: const Icon(Icons.chevron_right_rounded),
@@ -119,8 +122,8 @@ class _ConvenienceSettingsScreenState extends State<ConvenienceSettingsScreen> {
           ),
         ),
         SwitchListTile(
-          title: const Text("통계 그래프 상세 시간 표시"),
-          subtitle: const Text("막대 및 점 옆에 기록된 시간을 항상 노출합니다"),
+          title: Text(tr("통계 그래프 상세 시간 표시", "Show detailed times on chart")),
+          subtitle: Text(tr("막대 및 점 옆에 기록된 시간을 항상 노출합니다", "Always show recorded times next to bars and dots")),
           value: _showAllDetails,
           secondary: const Icon(Icons.segment_rounded),
           onChanged: (value) {
@@ -150,9 +153,9 @@ class _DateLabelSettingsScreenState extends State<DateLabelSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("날짜 표기")),
+      appBar: AppBar(title: Text(tr("날짜 표기", "Date labels"))),
       body: ListView(children: [
-        const _SectionHeader("통계 차트 상단의 요일·날짜 표기 방식"),
+        _SectionHeader(tr("통계 차트 상단의 요일·날짜 표기 방식", "How weekdays and dates appear above the chart")),
         RadioGroup<ChartDateLabelMode>(
           groupValue: _mode,
           onChanged: (value) {

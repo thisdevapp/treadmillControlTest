@@ -9,9 +9,12 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rxdart/rxdart.dart';
+import '../../core/l10n/app_locale.dart';
+import '../../core/memo/record_memo.dart';
 import '../../database/database.dart';
 import '../widgets/custom_picker_utils.dart';
 import '../widgets/record_manager.dart';
+import '../widgets/record_memo_sheet.dart';
 
 /// 차트 상단 날짜 표기 방식 (설정 > 편의성 기능 > 차트 보기 > 날짜 표기)
 enum ChartDateLabelMode {
@@ -23,15 +26,15 @@ enum ChartDateLabelMode {
   vertical;
 
   String get label => switch (this) {
-    ChartDateLabelMode.dynamic => "동적",
-    ChartDateLabelMode.horizontal => "가로",
-    ChartDateLabelMode.vertical => "세로",
+    ChartDateLabelMode.dynamic => tr("동적", "Dynamic"),
+    ChartDateLabelMode.horizontal => tr("가로", "Horizontal"),
+    ChartDateLabelMode.vertical => tr("세로", "Vertical"),
   };
 
   String get description => switch (this) {
-    ChartDateLabelMode.dynamic => "공간이 넉넉하면 45도, 부족하면 90도로 세워서 표기",
-    ChartDateLabelMode.horizontal => "요일 아래에 날짜를 가로로 표기",
-    ChartDateLabelMode.vertical => "항상 90도로 세워서 표기",
+    ChartDateLabelMode.dynamic => tr("공간이 넉넉하면 45도, 부족하면 90도로 세워서 표기", "Tilted 45° when there is room, 90° when tight"),
+    ChartDateLabelMode.horizontal => tr("요일 아래에 날짜를 가로로 표기", "Date shown horizontally under the weekday"),
+    ChartDateLabelMode.vertical => tr("항상 90도로 세워서 표기", "Always rotated 90°"),
   };
 }
 
@@ -55,7 +58,7 @@ class _ChartMetrics {
   /// 가로 표기 시 날짜를 요일 쪽으로 끌어올리는 양.
   /// 글자 줄 높이에 포함된 위아래 여백(요일의 descent, 숫자 위 빈 공간)이 글꼴 크기에 비례하므로 함께 비례시킴
   static double stackedOverlap(double lfs, double dfs) => math.max(4.0, dfs * 0.25 + lfs * 0.15);
-  static final Map<double, (Size, double)> _headerSizeCache = {};
+  static final Map<(String, double), (Size, double)> _headerSizeCache = {};
 
   factory _ChartMetrics(double dayWidth, ChartDateLabelMode mode) {
     double bw = (dayWidth * 0.75).clamp(6.0, 150.0);
@@ -67,9 +70,9 @@ class _ChartMetrics {
 
     // 글꼴 크기는 bw로만 정해지므로 라벨 크기는 bw 단위로 캐시
     // (한 줄 라벨 크기, 두 줄 가로 표기 높이)
-    final (Size header, double stackedHeight) = _headerSizeCache.putIfAbsent(bw, () {
-      final tp = headerPainter("월", "00", lfs, dfs, Colors.grey);
-      final tpLabel = stackedLabelPainter("월", lfs);
+    final (Size header, double stackedHeight) = _headerSizeCache.putIfAbsent((AppLocale.code, bw), () {
+      final tp = headerPainter(tr("월", "Wed"), "00", lfs, dfs, Colors.grey);
+      final tpLabel = stackedLabelPainter(tr("월", "Wed"), lfs);
       final tpDate = stackedDatePainter("00", dfs, Colors.grey);
       return (tp.size, tpLabel.height - stackedOverlap(lfs, dfs) + tpDate.height);
     });
@@ -349,7 +352,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       context: context,
       initialDate: currentStart,
       lastDate: currentEnd, 
-      helpText: "시작 날짜 선택",
+      helpText: tr("시작 날짜 선택", "Select start date"),
     );
     if (picked != null) {
       final newPeriod = currentEnd.difference(picked).inDays + 1;
@@ -367,7 +370,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       initialDate: currentEnd,
       firstDate: currentStart, 
       lastDate: DateTime.now(),
-      helpText: "끝 날짜 선택",
+      helpText: tr("끝 날짜 선택", "Select end date"),
     );
     if (picked != null) {
       final daysFromToday = baseDate.difference(picked).inDays;
@@ -430,6 +433,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                                 showAllDetails: widget.showAllDetails,
                                 longPressSeconds: widget.longPressSeconds,
                                 onExecuteLongPress: _executeLongPress,
+                                onTapRecord: _openMemo,
                                 onDraftingChanged: (drafting) {
                                   if (mounted && _isChartDrafting != drafting) {
                                     setState(() => _isChartDrafting = drafting);
@@ -488,7 +492,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
               return Padding(
                 padding: const EdgeInsets.only(right: 4.0),
                 child: ChoiceChip(
-                  label: Text("$days일", style: const TextStyle(fontSize: 11)),
+                  label: Text(tr("$days일", "${days}d"), style: const TextStyle(fontSize: 11)),
                   selected: _selectedPeriodDays == days,
                   onSelected: (selected) {
                     if (selected) _savePeriod(days);
@@ -503,7 +507,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
               IconButton(
                 onPressed: _resetToToday,
                 icon: const Icon(Icons.today_outlined, size: 18),
-                tooltip: "오늘로 이동",
+                tooltip: tr("오늘로 이동", "Go to today"),
                 constraints: const BoxConstraints(),
                 padding: const EdgeInsets.all(4),
               ),
@@ -619,7 +623,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                   decoration: BoxDecoration(color: color.withValues(alpha: 0.8), shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 4),
-                Text(t.name, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                Text(t.label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
               ],
             );
           }).toList(),
@@ -653,13 +657,13 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _menuItem(Icons.bedtime, "수면 기록 추가", () => _pickSleepPeriod(sleepType.id)),
+                  _menuItem(Icons.bedtime, tr("수면 기록 추가", "Add sleep record"), () => _pickSleepPeriod(sleepType.id)),
                   if (otherTypes.isNotEmpty) ...[
                     const Divider(height: 1),
                     ...otherTypes.map((type) {
                       return _menuItem(
                         _getIconData(type.iconName),
-                        "${type.name} 추가",
+                        tr("${type.label} 추가", "Add ${type.label}"),
                         () => _pickCustomEventTime(type),
                       );
                     })
@@ -736,9 +740,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           children: [
             Text(hit.subtitleText, style: const TextStyle(fontSize: 16)),
             const SizedBox(height: 24),
-            const Text("수행할 동작을 선택하세요", 
+            Text(tr("수행할 동작을 선택하세요", "Choose an action"),
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)
             ),
             const SizedBox(height: 16),
             
@@ -753,7 +757,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               icon: const Icon(Icons.edit_rounded),
-              label: const Text("기록 수정하기", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              label: Text(tr("기록 수정하기", "Edit record"), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
             
             const SizedBox(height: 12),
@@ -770,13 +774,25 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               icon: const Icon(Icons.delete_outline_rounded, color: Colors.red),
-              label: const Text("기록 삭제하기", style: TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold)),
+              label: Text(tr("기록 삭제하기", "Delete record"), style: const TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
         actions: const [],
       ),
     );
+  }
+
+  /// 기록을 탭하면 메모 보기 (메모가 없으면 작성)
+  Future<void> _openMemo(_HitInfo hit) async {
+    final r = await (widget.database.select(widget.database.customDataRecords)
+          ..where((t) => t.id.equals(hit.recordId)))
+        .getSingleOrNull();
+    if (r == null) return;
+    final types = await widget.database.getCustomDataTypes();
+    final type = types.where((t) => t.id == r.typeId).firstOrNull;
+    if (type == null || !mounted) return;
+    await RecordMemoSheet.open(context: context, record: r, type: type);
   }
 
   Future<void> _editRecord(_HitInfo hit) async {
@@ -827,16 +843,17 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("기록 삭제"),
-        content: const Text("정말로 이 기록을 완전히 삭제하시겠습니까?"),
+        title: Text(tr("기록 삭제", "Delete record")),
+        content: Text(tr("정말로 이 기록을 완전히 삭제하시겠습니까?", "Permanently delete this record?")),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr("취소", "Cancel"))),
           TextButton(
             onPressed: () async {
               await widget.database.deleteCustomDataRecord(hit.recordId);
+              await MemoStore.instance.delete(hit.recordId);
               if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text("삭제", style: TextStyle(color: Colors.red)),
+            child: Text(tr("삭제", "Delete"), style: const TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -852,6 +869,7 @@ class _StatisticsPageContent extends StatefulWidget {
   final double longPressSeconds;
   final double yAxisWidth;
   final Function(_HitInfo) onExecuteLongPress;
+  final Function(_HitInfo) onTapRecord;
   final Function(bool) onDraftingChanged;
   final ChartDateLabelMode dateLabelMode;
 
@@ -864,6 +882,7 @@ class _StatisticsPageContent extends StatefulWidget {
     required this.longPressSeconds,
     required this.yAxisWidth,
     required this.onExecuteLongPress,
+    required this.onTapRecord,
     required this.onDraftingChanged,
   });
 
@@ -967,6 +986,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
   Stream<Map<String, dynamic>>? _pageStream;
   Timer? _longPressTimer;
   Offset? _tapDownPos;
+  _HitInfo? _tapHit; // 누른 기록. 꾹 누르기 전에 떼면 탭으로 보고 메모를 엶
   static const double _dragSlop = 20.0; // 드래그 무시 범위 (픽셀)
 
   // 빈 칸 꾹 누르기 → 점/라인 생성
@@ -1000,6 +1020,12 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     super.initState();
     _dropTicker = createTicker(_onDropTick);
     _initStream();
+    MemoStore.instance.ids.addListener(_onMemosChanged);
+  }
+
+  // 메모를 쓰거나 지우면 메모 아이콘 갱신
+  void _onMemosChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -1015,6 +1041,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     _longPressTimer?.cancel();
     _createTimer?.cancel();
     _dropTicker.dispose();
+    MemoStore.instance.ids.removeListener(_onMemosChanged);
     if (_draftStart != null || _held != null) {
       // dispose 중에는 부모 setState가 불가하므로 다음 프레임에 잠금 해제
       final onDraftingChanged = widget.onDraftingChanged;
@@ -1107,6 +1134,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
                   showAllDetails: widget.showAllDetails,
                   yAxisWidth: widget.yAxisWidth,
                   dateLabelMode: widget.dateLabelMode,
+                  memoIds: MemoStore.instance.ids.value,
                 ),
                 foregroundPainter: _draftStart != null && _startDrop != null
                     ? _DraftPainter(
@@ -1131,7 +1159,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
                             color: draftColor,
                             isDarkMode: isDarkMode,
                             label: _sleepPeriodText(held.record, held.origStartUnix, held.origEndUnix),
-                            hint: "떼면 수정 메뉴 · 막대 끝을 잡고 끌면 시간 조정",
+                            hint: tr("떼면 수정 메뉴 · 막대 끝을 잡고 끌면 시간 조정", "Release for menu · Drag a bar end to adjust"),
                           )
                         : null,
               ),
@@ -1175,6 +1203,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     // 수정/삭제와 신규 생성 모두 설정의 꾹 누르기 시간(widget.longPressSeconds)을 실시간 반영
     final holdDuration = Duration(milliseconds: (widget.longPressSeconds * 1000).toInt());
     final hit = _checkHit(e.localPosition, frame.dates, frame.records, frame.types, frame.dayWidth, widget.yAxisWidth, frame.height);
+    _tapHit = hit;
     if (hit != null) {
       _longPressTimer = Timer(holdDuration, () => _holdRecord(hit));
     } else if (frame.types.isNotEmpty && _isInChartArea(e.localPosition, frame)) {
@@ -1271,8 +1300,12 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     }
 
     if (e.pointer == _primaryPointer) {
+      // 꾹 누르기 전에 움직이지 않고 떼면 탭: 메모 보기/작성
+      final _HitInfo? tapHit =
+          e is PointerUpEvent && _tapDownPos != null && (_longPressTimer?.isActive ?? false) ? _tapHit : null;
       _cancelPendingPress();
       _primaryPointer = null;
+      if (tapHit != null) widget.onTapRecord(tapHit);
     }
   }
 
@@ -1388,10 +1421,10 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
         context,
         type,
         held.isPoint
-            ? "기록 시각 변경\n${_recordTime(held.origStartUnix, r)} → ${_recordTime(start, r)}"
-            : "수면 시간 변경\n${_recordTime(held.origStartUnix, r)} ~ ${_recordTime(held.origEndUnix, r)}"
+            ? "${tr("기록 시각 변경", "Time changed")}\n${_recordTime(held.origStartUnix, r)} → ${_recordTime(start, r)}"
+            : "${tr("수면 시간 변경", "Sleep time changed")}\n${_recordTime(held.origStartUnix, r)} ~ ${_recordTime(held.origEndUnix, r)}"
                 " → ${_sleepPeriodText(r, start, end)}",
-        actionLabel: "수정취소",
+        actionLabel: tr("수정취소", "Undo"),
         onAction: () => _undoEdit(r, type),
       );
     }
@@ -1412,7 +1445,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
       rethrow;
     }
     if (!mounted) return;
-    RecordManager.showRecordToast(context, type, "수정을 취소했습니다");
+    RecordManager.showRecordToast(context, type, tr("수정을 취소했습니다", "Change undone"));
   }
 
   /// 기록 시각 표시 (차트 라벨과 같이 기록에 저장된 시간대 기준)
@@ -1422,20 +1455,20 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
   String _sleepPeriodText(CustomDataRecord r, int start, int end) {
     final d = end - start;
     return "${_recordTime(start, r)} ~ ${_recordTime(end, r)}"
-        " (${d ~/ 3600}시간 ${(d % 3600) ~/ 60}분)";
+        " (${trDuration(d ~/ 3600, (d % 3600) ~/ 60)})";
   }
 
   String? _draftHint() {
     final held = _held;
     if (held != null && !held.adjusting) {
       return switch (held.hit.edge) {
-        _AdjustEdge.sleepStart => "떼면 수정 메뉴 · 끌면 취침 시각 조정",
-        _AdjustEdge.sleepEnd => "떼면 수정 메뉴 · 끌면 기상 시각 조정",
-        _ => "떼면 수정 메뉴 · 끌면 시간 조정",
+        _AdjustEdge.sleepStart => tr("떼면 수정 메뉴 · 끌면 취침 시각 조정", "Release for menu · Drag to adjust bedtime"),
+        _AdjustEdge.sleepEnd => tr("떼면 수정 메뉴 · 끌면 기상 시각 조정", "Release for menu · Drag to adjust wake time"),
+        _ => tr("떼면 수정 메뉴 · 끌면 시간 조정", "Release for menu · Drag to adjust time"),
       };
     }
-    if (_draftEnd == null) return held == null ? "옆에 손가락을 하나 더 대면 기간으로 전환" : null;
-    if (_primaryPointer == null || _secondaryPointer == null) return "반대쪽 점을 눌러 함께 조정";
+    if (_draftEnd == null) return held == null ? tr("옆에 손가락을 하나 더 대면 기간으로 전환", "Touch with a second finger to make a period") : null;
+    if (_primaryPointer == null || _secondaryPointer == null) return tr("반대쪽 점을 눌러 함께 조정", "Touch the other dot to adjust it too");
     return null;
   }
 
@@ -1456,6 +1489,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
     _longPressTimer?.cancel();
     _createTimer?.cancel();
     _tapDownPos = null;
+    _tapHit = null;
   }
 
   void _startDraft() {
@@ -1648,7 +1682,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
   }
 
   String _draftLabel(List<DateTime> dates) {
-    final f = DateFormat('M/d(E) HH:mm', 'ko_KR');
+    final f = DateFormat(tr('M/d(E) HH:mm', 'EEE M/d HH:mm'), AppLocale.intl);
     final start = _anchorTime(_draftStart!, dates);
     if (_draftEnd == null) return f.format(start);
 
@@ -1660,7 +1694,7 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
       b = tmp;
     }
     final diff = b.difference(a);
-    return "${f.format(a)} → ${f.format(b)}  (${diff.inHours}시간 ${diff.inMinutes % 60}분)";
+    return "${f.format(a)} → ${f.format(b)}  (${trDuration(diff.inHours, diff.inMinutes % 60)})";
   }
 
   _HitInfo? _checkHit(Offset pos, List<DateTime> dates, List<CustomDataRecord> records, List<CustomDataType> types, double dayWidth, double left, double height) {
@@ -1722,12 +1756,12 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
             }
             final dtS = DateTime.fromMillisecondsSinceEpoch((r.unixTimestamp + r.offsetSeconds) * 1000, isUtc: true);
             final dtE = DateTime.fromMillisecondsSinceEpoch((sLocalEnd + r.offsetSeconds) * 1000, isUtc: true);
-            final durationStr = "${(sLocalEnd - r.unixTimestamp) ~/ 3600}시간 ${((sLocalEnd - r.unixTimestamp) % 3600) ~/ 60}분";
+            final durationStr = trDuration((sLocalEnd - r.unixTimestamp) ~/ 3600, ((sLocalEnd - r.unixTimestamp) % 3600) ~/ 60);
             return _HitInfo(
               recordId: r.id,
               hitType: 'sleep',
-              titleText: "수면 기록 관리",
-              subtitleText: "기간: ${DateFormat('HH:mm').format(dtS)} ~ ${DateFormat('HH:mm').format(dtE)} ($durationStr)",
+              titleText: tr("수면 기록 관리", "Manage sleep record"),
+              subtitleText: "${tr("기간", "Period")}: ${DateFormat('HH:mm').format(dtS)} ~ ${DateFormat('HH:mm').format(dtE)} ($durationStr)",
               targetPos: Offset(centerX, pos.dy),
               displayDate: DateFormat('yyyy-MM-dd').format(targetDate),
               dayIdx: dayIdx,
@@ -1748,8 +1782,8 @@ class _StatisticsPageContentState extends State<_StatisticsPageContent> with Sin
             return _HitInfo(
               recordId: r.id,
               hitType: 'custom',
-              titleText: "${type.name} 기록 관리",
-              subtitleText: "시각: $timeText\n내용: ${r.value ?? '단순 기록'}",
+              titleText: tr("${type.label} 기록 관리", "Manage ${type.label} record"),
+              subtitleText: "${tr("시각", "Time")}: $timeText\n${tr("내용", "Details")}: ${r.value ?? tr("단순 기록", "Simple record")}",
               targetPos: Offset(centerX, y),
               displayDate: DateFormat('yyyy-MM-dd').format(targetDate),
               dayIdx: dayIdx,
@@ -1772,8 +1806,10 @@ class SleepTimelinePainter extends CustomPainter {
   final bool showAllDetails;
   final double yAxisWidth;
   final ChartDateLabelMode dateLabelMode;
+  final Set<int> memoIds; // 메모가 있는 기록 (시간 옆에 메모 아이콘)
 
   SleepTimelinePainter({
+    this.memoIds = const {},
     required this.dateLabelMode,
     required this.allDates, 
     required this.records, 
@@ -1807,7 +1843,7 @@ class SleepTimelinePainter extends CustomPainter {
       final double centerX = yAxisWidth + (i * dayWidth) + (dayWidth / 2);
 
       // 상단 날짜 라벨
-      final String weekdayText = DateFormat('E', 'ko_KR').format(date);
+      final String weekdayText = DateFormat('E', AppLocale.intl).format(date);
       final String dayText = DateFormat('dd').format(date);
       final Color dateColor = isDarkMode ? Colors.white : Colors.black;
       if (metrics.headerAngle == 0) {
@@ -1930,7 +1966,8 @@ class SleepTimelinePainter extends CustomPainter {
 
             // 취침 시간 (막대 상단)
             if (r.unixTimestamp >= dayStartUnix) {
-              final tp = _getTextPainter(_formatUnix(r.unixTimestamp, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
+              final tp = _getTextPainter(_formatUnix(r.unixTimestamp, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87,
+                  memo: memoIds.contains(r.id));
               
               double textY = startY - 5;
               bool isAbove = true;
@@ -1951,7 +1988,8 @@ class SleepTimelinePainter extends CustomPainter {
 
             // 기상 시간 (막대 하단)
             if (sLocalEnd <= dayEndUnix) {
-              final tp = _getTextPainter(_formatUnix(sLocalEnd, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87);
+              final tp = _getTextPainter(_formatUnix(sLocalEnd, r.offsetSeconds), metrics.valueFontSize, isDarkMode ? Colors.white70 : Colors.black87,
+                  memo: memoIds.contains(r.id) && r.unixTimestamp < dayStartUnix);
               
               double textY = endY + 5;
               bool isAbove = false;
@@ -1996,8 +2034,8 @@ class SleepTimelinePainter extends CustomPainter {
             final double medY = metrics.topPadding + ((r.unixTimestamp - dayStartUnix) / 86400.0) * chartHeight;
             
             final bool hasValue = r.value != null && r.value!.trim().isNotEmpty;
-            final String txt = hasValue ? "${type.name}: ${r.value}" : _formatUnix(r.unixTimestamp, r.offsetSeconds);
-            final tp = _getTextPainter(txt, metrics.valueFontSize, typeColor.withValues(alpha: 0.9), isBold: hasValue);
+            final String txt = hasValue ? "${type.label}: ${r.value}" : _formatUnix(r.unixTimestamp, r.offsetSeconds);
+            final tp = _getTextPainter(txt, metrics.valueFontSize, typeColor.withValues(alpha: 0.9), isBold: hasValue, memo: memoIds.contains(r.id));
 
             double textY = medY - metrics.medRadius - 5;
             bool isAbove = true;
@@ -2019,8 +2057,28 @@ class SleepTimelinePainter extends CustomPainter {
     }
   }
 
-  TextPainter _getTextPainter(String text, double fontSize, Color color, {bool isBold = false}) {
-    return TextPainter(text: TextSpan(text: text, style: TextStyle(color: color, fontSize: fontSize, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)), textDirection: ui.TextDirection.ltr)..layout();
+  /// [memo]가 true면 글자 뒤에 메모 아이콘을 붙임
+  TextPainter _getTextPainter(String text, double fontSize, Color color, {bool isBold = false, bool memo = false}) {
+    const IconData memoIcon = Icons.sticky_note_2_rounded;
+    return TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(color: color, fontSize: fontSize, fontWeight: isBold ? FontWeight.bold : FontWeight.normal),
+        children: [
+          if (memo)
+            TextSpan(
+              text: ' ${String.fromCharCode(memoIcon.codePoint)}',
+              style: TextStyle(
+                color: const Color(0xFFFFB300), // 스티키 노트 노란색
+                fontSize: fontSize * 1.15,
+                fontFamily: memoIcon.fontFamily,
+                package: memoIcon.fontPackage,
+              ),
+            ),
+        ],
+      ),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
   }
 
   void _drawVerticalTextWithPainter(Canvas canvas, TextPainter tp, Offset pos, {required bool isAbove}) {

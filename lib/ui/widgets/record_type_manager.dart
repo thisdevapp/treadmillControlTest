@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import '../../core/l10n/app_locale.dart';
+import '../../core/memo/record_memo.dart';
 import '../../database/database.dart';
 
 /// 기록 버튼(데이터 타입)의 추가, 수정, 삭제 및 아이콘 선택 UI를 전담하는 모듈
@@ -12,7 +14,7 @@ class RecordTypeManager {
     required VoidCallback onSaved,
   }) {
     final isEdit = type != null;
-    final nameController = TextEditingController(text: type?.name ?? "");
+    final nameController = TextEditingController(text: type?.label ?? "");
     String selectedIcon = type?.iconName ?? "medication";
     int selectedColorValue = type?.colorValue ?? 0xFF3F51B5;
 
@@ -75,7 +77,7 @@ class RecordTypeManager {
               padding: const EdgeInsets.only(top: 20.0),
               child: Column(
                 children: [
-                  Text("선택된 기타 아이콘", 
+                  Text(tr("선택된 기타 아이콘", "Selected icon"), 
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: currentThemeColor)),
                   const SizedBox(height: 8),
                   Container(
@@ -92,7 +94,7 @@ class RecordTypeManager {
           }
 
           return AlertDialog(
-            title: Text(isEdit ? "기록 버튼 수정" : "새 기록 버튼 추가", 
+            title: Text(isEdit ? tr("기록 버튼 수정", "Edit record type") : tr("새 기록 버튼 추가", "Add record type"), 
                 style: const TextStyle(fontWeight: FontWeight.bold)),
             content: SingleChildScrollView(
               child: Column(
@@ -100,16 +102,16 @@ class RecordTypeManager {
                 children: [
                   TextField(
                     controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: "이름", 
-                      border: OutlineInputBorder(),
-                      hintText: "예: 비타민, 아메리카노"
+                    decoration: InputDecoration(
+                      labelText: tr("이름", "Name"),
+                      border: const OutlineInputBorder(),
+                      hintText: tr("예: 비타민, 아메리카노", "e.g. Vitamins, Americano")
                     ),
                   ),
                   const SizedBox(height: 24),
-                  const Align(
+                  Align(
                     alignment: Alignment.centerLeft,
-                    child: Text("아이콘 선택", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    child: Text(tr("아이콘 선택", "Icon"), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -152,9 +154,9 @@ class RecordTypeManager {
                   ),
                   buildCustomIconPreview(),
                   const SizedBox(height: 24),
-                  const Align(
+                  Align(
                     alignment: Alignment.centerLeft,
-                    child: Text("테마 색상", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    child: Text(tr("테마 색상", "Color"), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -207,7 +209,7 @@ class RecordTypeManager {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx), 
-                child: const Text("취소")
+                child: Text(tr("취소", "Cancel"))
               ),
               FilledButton(
                 style: FilledButton.styleFrom(
@@ -217,7 +219,9 @@ class RecordTypeManager {
                 onPressed: () async {
                   if (nameController.text.isEmpty) return;
                   if (isEdit) {
-                    await database.updateCustomDataTypeInfo(type.id, nameController.text, selectedIcon, selectedColorValue);
+                    // 기본 데이터는 번역된 이름을 그대로 두면 원래(한국어) 이름을 유지 (수면 판별 등에 사용)
+                    final name = type.isPreset && nameController.text == type.label ? type.name : nameController.text;
+                    await database.updateCustomDataTypeInfo(type.id, name, selectedIcon, selectedColorValue);
                   } else {
                     await database.addCustomDataType(
                       name: nameController.text, 
@@ -228,7 +232,7 @@ class RecordTypeManager {
                   onSaved();
                   if (ctx.mounted) Navigator.pop(ctx);
                 },
-                child: Text(isEdit ? "수정 완료" : "생성"),
+                child: Text(isEdit ? tr("수정 완료", "Save") : tr("생성", "Create")),
               ),
             ],
           );
@@ -247,7 +251,7 @@ class RecordTypeManager {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("커스텀 색상 선택"),
+        title: Text(tr("커스텀 색상 선택", "Custom color")),
         content: SingleChildScrollView(
           child: ColorPicker(
             pickerColor: initialColor,
@@ -260,13 +264,13 @@ class RecordTypeManager {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr("취소", "Cancel"))),
           FilledButton(
             onPressed: () {
               onColorSelected(pickedColor);
               Navigator.pop(ctx);
             },
-            child: const Text("선택"),
+            child: Text(tr("선택", "Select")),
           ),
         ],
       ),
@@ -295,7 +299,7 @@ class RecordTypeManager {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text("기타 아이콘 선택", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  Text(tr("기타 아이콘 선택", "More icons"), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
                 ],
               ),
@@ -335,17 +339,19 @@ class RecordTypeManager {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("버튼 삭제", style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text("'${type.name}' 버튼과 관련된 모든 기록이 영구적으로 삭제됩니다. 계속하시겠습니까?"),
+        title: Text(tr("버튼 삭제", "Delete record type"), style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(tr("'${type.label}' 버튼과 관련된 모든 기록이 영구적으로 삭제됩니다. 계속하시겠습니까?",
+            "'${type.label}' and all of its records will be permanently deleted. Continue?")),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("취소")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr("취소", "Cancel"))),
           TextButton(
             onPressed: () async {
               await database.deleteCustomDataType(type.id);
+              await MemoStore.instance.prune(await database.getAllRecordIds());
               onDeleteDone();
               if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text("삭제", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: Text(tr("삭제", "Delete"), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
